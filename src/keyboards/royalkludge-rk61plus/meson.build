@@ -8,6 +8,7 @@ keyboards += {
             'user_matrix.c',
             'user_init.c',
             'user_sleep.c',
+            'user_battery.c',
             'kb.c',
         ),
         'layouts' : {

@@ -1,6 +1,7 @@
 #include "kbdef.h"
 #include "user_sleep.h"
 #include "user_init.h"
+#include "user_battery.h"
 #include "gpio.h"
 #include "extint.h"
 
@@ -61,6 +62,9 @@ void user_sleep_wake(void)
 {
     extint_wake_disable();
     user_gpio_init();
+
+    // Re-measure the battery on every wake, like the stock firmware.
+    user_battery_measure();
 }
 
 #endif // SLEEP_ENABLE
