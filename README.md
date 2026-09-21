@@ -24,6 +24,7 @@ You can very easily end up with a bricked device if the written firmware can't j
 | E-YOOSO Z11 | SH68F90A / BYK901 | N/A | | [Details](docs/keyboards/eyooso-z11.md) |
 | Genesis Thor 300 | SH68F881 / BYK801 | N/A | | [Details](docs/keyboards/genesis-thor-300.md) |
 | CIY X77 | SH68F89 / BYK816 | N/A | External 24Cxx EEPROM | [Details](docs/keyboards/ciy-x77.md) |
+| Royal Kludge RK61 Plus | SH68F90A / BYK916 | 2.4G, BT | | [Details](docs/keyboards/royalkludge-rk61plus.md) |
 
 Platform notes: [SH68F90 / SH68F90A](docs/platforms/sh68f90.md), [SH68F881](docs/platforms/sh68f881.md), [SH68F89](docs/platforms/sh68f89.md).
 
