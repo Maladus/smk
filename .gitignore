@@ -4,6 +4,9 @@
 
 build/
 
+# mise-built patched ucsim simulator (`mise run setup-ucsim`)
+.mise/ucsim/
+
 # `nix build` output symlink
 /result
 
