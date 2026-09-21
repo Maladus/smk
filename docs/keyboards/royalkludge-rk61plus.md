@@ -75,9 +75,13 @@ capacitor, release it, then time how long the other pin takes to flip — the
 classic ADC substitute. It runs at every boot/wake (stock `0xF000` → `f770`),
 kicks the watchdog while it measures, and stores the result in flag bit `0x04`.
 
-SMK does not use that path. It reads the battery level from the BK3632 over the
-SPI status query instead: `status_bytes[0] & 0x07` → `keyboard_state.battery_level`
-(0..7), plus a 1-bit `low_power` flag from `status_bytes[1]`.
+SMK implements the same RC-timing path in `user_battery.c`, run at boot and on
+wake: P0.1 discharges the capacitor and then charges it through its pull-up, and
+a count loop (kicking the watchdog each iteration) times how long P0.0 stays high
+before it flips. The count maps to `keyboard_state.battery_level` (0..7) and a
+1-bit `low_power` flag (level ≤ 1). The 0..7 split is a first-order linear split
+of the stock's 100-count window (`0x0E = 0x64`); the exact RC time constant is
+board-dependent, so the thresholds need a hardware calibration pass.
 
 ## Other pins
 
