@@ -21,7 +21,7 @@ import subprocess
 import threading
 import time
 
-from sim import find_firmware, find_sim, load_symbols
+from sim import find_firmware, find_sim, load_symbols, read_intel_hex
 from pathlib import Path
 
 # --- Air60 matrix wiring (src/keyboards/nuphy-air60/kbdef.h) ----------------
@@ -182,13 +182,13 @@ class UcsimSession:
     def set_sfr(self, addr, val):
         self.cmd("set mem sfr 0x%02x 0x%02x" % (addr, val))
 
-    # Staging cells the SH68F90 model reads as the external pin level of P5 / P7
-    # (see sh68f90.cc). Writing here drives the pins the board would drive.
-    PIN_STAGE = {P5: 0x1F15, P7: 0x1F17}
+    # Staging cells the SH68F90 model reads as the external pin level of P0 / P5 /
+    # P7 (see sh68f90.cc). Writing here drives the pins the board would drive.
+    PIN_STAGE = {P0: 0x1F16, P5: 0x1F15, P7: 0x1F17}
 
     def set_pin(self, port, level):
         """Set the external level the board presents on `port`'s pins (input bits
-        read this; idle high == pull-ups). `port` is the SFR address (P5/P7)."""
+        read this; idle high == pull-ups). `port` is the SFR address (P0/P5/P7)."""
         self.cmd("set mem xram 0x%x 0x%02x" % (self.PIN_STAGE[port], level))
 
     def get_xram(self, addr, n=1):
@@ -453,9 +453,16 @@ class Rk61Sim(UcsimSession):
     GPIO ports and the test drives the key matrix (KeyMatrix with RK61 maps); the
     boot/park port values are read straight back from the SFR cells.
 
-    P0/P4 read as their output latch, but P7 (and P5) are read direction-aware:
-    an input bit returns the staged external pin level (idle-high pull-ups), not
-    the latch. The boot/park assertions therefore check P7's output bits only."""
+    P0/P5/P7 are read direction-aware by the simulator: an input bit returns the
+    staged external pin level (idle-high pull-ups), not the latch. P4 still reads
+    its latch. The boot/park assertions therefore check each port's output bits
+    only."""
+
+    # P0CR at boot (P0.2 WAKE + P0.4 MOSI + P0.5 enable are outputs) and after
+    # park (P0.0/P0.1 RC + P0.2 WAKE + P0.4 MOSI + P0.5 enable + P0.6/P0.7
+    # status are outputs).
+    P0_OUT_BOOT = 0x34
+    P0_OUT_PARK = 0xF7
 
     # P7CR at boot (P7.4 enable + P7.6 control are outputs) and after park
     # (P7.0 parked-only + P7.4 enable + P7.6/P7.7 control are outputs).
@@ -502,3 +509,45 @@ class Rk61Sim(UcsimSession):
         self.run()
         self.cmd("delete")
         return self.ports()
+
+    def battery_loop_addr(self):
+        """Address of the `JNB P0.0` count-loop head inside user_battery_measure()
+        (opcode 0x30 0x80). The loop is the RC sense-flip detector; breaking here
+        lets a test flip the staged P0.0 level after a scripted number of turns."""
+        mem = read_intel_hex(self.firmware)
+        base = self._a("user_battery_measure")
+        for off in range(0x100):
+            a = base + off
+            if mem.get(a) == 0x30 and mem.get(a + 1) == 0x80:  # JNB P0.0, rel
+                return a
+        raise unittest.SkipTest("JNB P0.0 count loop not found in user_battery_measure")
+
+    def battery_level_after(self, flip_after):
+        """Invoke user_battery_measure() with P0.0 staged high, flip P0.0 low after
+        `flip_after` count-loop turns, and return (battery_level, low_power) from
+        keyboard_state. The delay loops are patched to RET and a return frame is
+        staged so the function RETs onto the NOP sled at 0x9000."""
+        self.cmd("reset")
+        self.cmd("set mem rom 0x%x 0x22" % self._a("delay_us"))   # RET
+        self.cmd("set mem rom 0x%x 0x22" % self._a("delay_ms"))   # RET
+        self.set_pin(P0, 0xFF)                # sense pin P0.0 idles high
+        self.cmd("set mem rom 0x9000 " + " ".join(["0x00"] * 16))
+        self.cmd("set mem iram 0x86 0x00")
+        self.cmd("set mem iram 0x87 0x90")
+        self.set_sfr(0x81, 0x87)              # SP
+        self.cmd("pc 0x%x" % self._a("user_battery_measure"))
+
+        loop = self.battery_loop_addr()
+        self.brk(loop)
+        for _ in range(flip_after + 1):       # reach the loop, then flip_after turns
+            self.run()
+        self.set_pin(P0, 0xFE)                # flip P0.0 low; next check exits
+        self.cmd("delete")                    # drop the loop breakpoint
+
+        self.brk(0x9000)
+        self.run()                            # loop exits; RETs onto the sled
+        self.cmd("delete")
+
+        state = self._a("keyboard_state")
+        return (self.get_xram(state + 2, 1)[0],   # battery_level
+                self.get_xram(state + 3, 1)[0])   # low_power

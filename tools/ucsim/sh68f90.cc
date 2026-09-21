@@ -56,11 +56,12 @@ class cl_sh68f90_sie : public cl_hw
     // a real input enables via PxPCR). The board model (tests/) pulls bits low via
     // the staging cells registered in init(); nothing board-specific lives here.
     t_mem                 pin_ext[8];
-    class cl_memory_cell *cell_pinext_p5, *cell_pinext_p7;
-    // Bit cells for the bit-addressable input pins of P5/P7. Bit reads bypass the
-    // byte read() operator, so we hook these too (as cl_port does) -- otherwise a
-    // `MOV C,P5.5` (CONN_MODE switch) reads the latch instead of the pin level.
-    class cl_memory_cell *p5_bit[8], *p7_bit[8];
+    class cl_memory_cell *cell_pinext_p0, *cell_pinext_p5, *cell_pinext_p7;
+    // Bit cells for the bit-addressable input pins of P0/P5/P7. Bit reads bypass
+    // the byte read() operator, so we hook these too (as cl_port does) -- otherwise
+    // a `MOV C,P5.5` (CONN_MODE switch) or `JNB P0.0` (RC battery sense) reads the
+    // latch instead of the pin level.
+    class cl_memory_cell *p0_bit[8], *p5_bit[8], *p7_bit[8];
 
    public:
     cl_sh68f90_sie(class cl_uc *auc) : cl_hw(auc, HW_DUMMY, 0, "sh68f90_sie")
@@ -82,9 +83,9 @@ class cl_sh68f90_sie : public cl_hw
         miso_bitpos       = 0;
         for (int i = 0; i < 8; i++)
             pin_ext[i] = 0xff; // pins idle high (pull-ups)
-        cell_pinext_p5 = cell_pinext_p7 = 0;
+        cell_pinext_p0 = cell_pinext_p5 = cell_pinext_p7 = 0;
         for (int i = 0; i < 8; i++)
-            p5_bit[i] = p7_bit[i] = 0;
+            p0_bit[i] = p5_bit[i] = p7_bit[i] = 0;
     }
     virtual int init(void)
     {
@@ -118,20 +119,24 @@ class cl_sh68f90_sie : public cl_hw
             cell_pcon    = register_cell(sfr, 0x87); // PCON: bit1 -> sleep/power-down
         }
         if (xram) {
-            // Staging for the external pin levels of P5 / P7 (the ports the firmware
-            // reads as inputs). The board model writes these; read() applies them to
-            // the input bits. Outside the firmware's xram window, so they never alias
-            // real data.
+            // Staging for the external pin levels of P0 / P5 / P7 (the ports the
+            // firmware reads as inputs). The board model writes these; read()
+            // applies them to the input bits. Outside the firmware's xram window,
+            // so they never alias real data.
+            cell_pinext_p0 = register_cell(xram, 0x1f16);
             cell_pinext_p5 = register_cell(xram, 0x1f15);
             cell_pinext_p7 = register_cell(xram, 0x1f17);
         }
         class cl_address_space *bas = uc->address_space("bits");
         if (bas) {
-            // The firmware reads some pins bit-wise (P5: rows R3/R4 b3/b4, CONN_MODE
-            // b5, OS switch b6; P7: rows R0-R2 b1-b3). Hook those bit cells so bit
-            // reads see the pin level too. (Bit addr of Px.i = Px + i; these are all
-            // inputs, so no bit-write linkage to maintain.)
-            int p5in[] = {3, 4, 5, 6}, p7in[] = {1, 2, 3};
+            // The firmware reads some pins bit-wise (P0: RC battery sense/discharge
+            // b0/b1; P5: rows R3/R4 b3/b4, CONN_MODE b5, OS switch b6; P7: rows
+            // R0-R2 b1-b3). Hook those bit cells so bit reads see the pin level too.
+            // (Bit addr of Px.i = Px + i; these are all inputs, so no bit-write
+            // linkage to maintain.)
+            int p0in[] = {0, 1}, p5in[] = {3, 4, 5, 6}, p7in[] = {1, 2, 3};
+            for (int k = 0; k < 2; k++)
+                p0_bit[p0in[k]] = register_cell(bas, 0x80 + p0in[k]);
             for (int k = 0; k < 4; k++)
                 p5_bit[p5in[k]] = register_cell(bas, 0x88 + p5in[k]);
             for (int k = 0; k < 3; k++)
@@ -153,9 +158,11 @@ class cl_sh68f90_sie : public cl_hw
     }
     virtual t_mem read(class cl_memory_cell *cell)
     {
+        if (cell == cell_p0) return port_read(cell, 0, 0xe1); // P0CR @ 0xe1
         if (cell == cell_p5) return port_read(cell, 5, 0xe6); // P5CR @ 0xe6
         if (cell == cell_p7) return port_read(cell, 7, 0xd1); // P7CR @ 0xd1
         for (int i = 0; i < 8; i++) {
+            if (p0_bit[i] && cell == p0_bit[i]) return (port_read(cell_p0, 0, 0xe1) >> i) & 1;
             if (p5_bit[i] && cell == p5_bit[i]) return (port_read(cell_p5, 5, 0xe6) >> i) & 1;
             if (p7_bit[i] && cell == p7_bit[i]) return (port_read(cell_p7, 7, 0xd1) >> i) & 1;
         }
@@ -207,8 +214,9 @@ class cl_sh68f90_sie : public cl_hw
     }
     virtual void write(class cl_memory_cell *cell, t_mem *val)
     {
-        // Board model sets the external pin levels for P5 / P7 via these staging
-        // cells (read() applies them to the input bits).
+        // Board model sets the external pin levels for P0 / P5 / P7 via these
+        // staging cells (read() applies them to the input bits).
+        if (cell == cell_pinext_p0) pin_ext[0] = *val & 0xff;
         if (cell == cell_pinext_p5) pin_ext[5] = *val & 0xff;
         if (cell == cell_pinext_p7) pin_ext[7] = *val & 0xff;
         // Flash ISP: the firmware writes the IB register file then commits with
