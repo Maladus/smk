@@ -181,36 +181,43 @@ void kb_update_switches()
 #endif
 }
 
-void kb_send_report(__xdata report_keyboard_t *report)
+// RF carries reports only while a channel is actually connected; otherwise USB
+// is the fallback. This is what makes the board type over USB when it is plugged
+// in but no BLE/2.4G host is bound, and it matches "BLE dominates USB while a BT
+// channel is connected". The active-channel toggle clears conn_mode to USB.
+static bool kb_rf_active(void)
 {
 #ifdef RF_ENABLED
-    if (conn_mode == KEYBOARD_CONN_MODE_RF) {
+    return conn_mode == KEYBOARD_CONN_MODE_RF && keyboard_state.connected;
+#else
+    return false;
+#endif
+}
+
+void kb_send_report(__xdata report_keyboard_t *report)
+{
+    if (kb_rf_active()) {
         rf_send_report(report);
         return;
     }
-#endif
     usb_send_report(report);
 }
 
 void kb_send_nkro(__xdata report_nkro_t *report)
 {
-#ifdef RF_ENABLED
-    if (conn_mode == KEYBOARD_CONN_MODE_RF) {
+    if (kb_rf_active()) {
         rf_send_nkro(report);
         return;
     }
-#endif
     usb_send_nkro(report);
 }
 
 void kb_send_extra(__xdata report_extra_t *report)
 {
-#ifdef RF_ENABLED
-    if (conn_mode == KEYBOARD_CONN_MODE_RF) {
+    if (kb_rf_active()) {
         rf_send_extra(report);
         return;
     }
-#endif
     usb_send_extra(report);
 }
 
