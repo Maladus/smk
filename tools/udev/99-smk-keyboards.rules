@@ -1,0 +1,16 @@
+# SMK keyboards: let sinowisp / smk-console reach /dev/hidraw* without root.
+#
+#   258a:00f8  SMK firmware HID interfaces (keyboard + vendor/ISP report)
+#   0603:1020  SinoWealth ISP bootloader
+#
+# Install:
+#   sudo cp tools/udev/99-smk-keyboards.rules /etc/udev/rules.d/
+#   sudo udevadm control --reload-rules
+#   sudo udevadm trigger --subsystem-match=hidraw
+# then replug the keyboard (or re-trigger hidraw).
+#
+# GROUP="plugdev" + MODE covers non-logind setups; TAG+="uaccess" grants the
+# active-seat user an ACL on systems using systemd-logind.
+
+SUBSYSTEM=="hidraw", ATTRS{idVendor}=="258a", ATTRS{idProduct}=="00f8", GROUP="plugdev", MODE="0660", TAG+="uaccess"
+SUBSYSTEM=="hidraw", ATTRS{idVendor}=="0603", ATTRS{idProduct}=="1020", GROUP="plugdev", MODE="0660", TAG+="uaccess"
