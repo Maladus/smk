@@ -12,7 +12,3 @@ void kb_send_extra(__xdata report_extra_t *report);
 bool kb_process_record(uint16_t keycode, bool key_pressed);
 void kb_update_switches();
 void kb_update();
-
-// True when the on/off switch is on, i.e. the radio should be brought up. When
-// off the board is wired/USB and the RF init is skipped.
-bool kb_radio_enabled(void);

@@ -78,17 +78,6 @@ static bool kb_wired(void)
     return POWER_SWITCH == 1;
 }
 
-// The radio only needs to run when the on/off switch is on (wireless); when off
-// the board is wired/USB, so main() can skip rf_init().
-bool kb_radio_enabled(void)
-{
-#    ifdef RF_ENABLED
-    return !kb_wired();
-#    else
-    return false;
-#    endif
-}
-
 // Switch the RF link and mirror it into the keyboard_state the channel
 // indicator reads. `persist` records a user-chosen BT channel in settings; the
 // band switch must not overwrite the remembered channel with the 2.4G slot.

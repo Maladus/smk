@@ -99,9 +99,10 @@ void main(void)
 #ifdef RF_ENABLED
         // Bring the radio up from the main loop, like the stock firmware: USB is
         // already connected and serviced, so the host's enumeration never waits
-        // on the RF init. Skip it entirely while the on/off switch is off (the
-        // board is wired/USB then); bring it up if the user later switches on.
-        if (!rf_up && kb_radio_enabled()) {
+        // on the RF init. The radio stays up in wired/USB mode too, so Fn+Q/W/E
+        // can connect a BLE host while the cable is plugged in and toggle back
+        // to USB (stock behaviour).
+        if (!rf_up) {
             rf_up = true;
             rf_init();
             restore_rf_link();

@@ -140,7 +140,8 @@ The two inputs select the mode: on/off **off** → wired/USB (the cable powers t
 board); on/off **on** + B → BLE (last BT channel); on/off **on** + G → direct 2.4G.
 The stock switch-poll trace (`0x7C00`) in the original plan had P5.5/P5.6 swapped;
 the hardware mapping above was confirmed by flipping the switches and reading the
-pins. When off, the radio is not brought up at all (`main()` skips `rf_init()`).
+pins. The radio stays up in wired/USB mode too, so `Fn`+`Q`/`W`/`E` can connect a
+BLE host while the cable is plugged in and toggle back to USB (stock behaviour).
 
 ## Backlight
 
