@@ -107,7 +107,9 @@ class RgbSim:
         return self.kb.get_xram(PWM_DUTY2H, 18)
 
     def led_columns(self):
-        """The 14 LED column levels (1 = driven HIGH) from the P6/P5/P4 latches."""
+        """The 14 LED column levels (1 = driven HIGH) from the P6/P5/P4 latches.
+        The LED columns are active-low: the selected column is driven LOW to
+        source current, and the rest idle HIGH."""
         p6 = self.kb.get_sfr(P6)
         p5 = self.kb.get_sfr(P5)
         p4 = self.kb.get_sfr(P4)
@@ -162,11 +164,11 @@ class TestPwmDutyAndColumns(unittest.TestCase):
                     # model, which pins that bit high, so a byte read cannot
                     # observe C9's level. The PWM duty path above still covers it.
                     continue
-                self.assertEqual(cols[col], 1, f"col {col}: selected column HIGH")
+                self.assertEqual(cols[col], 0, f"col {col}: selected column LOW (active-low)")
                 for other in range(14):
                     if other != col and other != 9:
-                        self.assertEqual(cols[other], 0,
-                                         f"col {col}: column {other} stays LOW")
+                        self.assertEqual(cols[other], 1,
+                                         f"col {col}: column {other} stays HIGH")
             self.assertEqual(sim.duty2h(), [0] * 18,
                              "DUTY2 high bytes stay zero for 8-bit duty")
         finally:

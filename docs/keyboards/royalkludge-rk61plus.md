@@ -174,7 +174,10 @@ and a per-channel `DUTY1 = DUTY2` test ramp (`0x35, 0x36, ...`); the render path
 it to **DUTY2** — so DUTY2 is the animated duty and DUTY1 is the fixed on-time.
 
 Because the LED columns share the key-matrix column pins, the matrix scan and the
-LED scan must be time-multiplexed.
+LED scan must be time-multiplexed. The LED columns are **active-low**: the
+selected column is driven LOW to source current into its row's sinks, and the
+other columns idle HIGH. (The original trace had this inverted, which lit the
+whole row except the selected key.)
 
 Backlight and function controls follow the RK61 Plus manual:
 
