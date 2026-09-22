@@ -108,3 +108,44 @@ meson setup --reconfigure build > /dev/null
 meson compile -C build nuphy-air60_default_smk.hex
 meson test -C build sim-tests --print-errorlogs
 '''
+
+# ICP flashing over the sinodude-serial Arduino programmer. Needs `sinodude` on
+# PATH. Unlike sinowisp (which writes the firmware region only), this writes the
+# code flash exactly as the given Intel HEX describes, so it can restore or
+# replace the bootloader too. The target part is BYK916 (SH68F90A); override the
+# port with SINODUDE_PORT.
+
+[tasks.flash-isp]
+description = "Write the RK61 Plus firmware over the sinodude-serial ICP programmer"
+depends = ["setup"]
+run = '''
+#!/usr/bin/env bash
+set -euo pipefail
+meson compile -C build royalkludge-rk61plus_default_smk.hex > /dev/null
+sinodude write --flash build/royalkludge-rk61plus_default_smk.hex \
+  -c sinodude-serial -p "${SINODUDE_PART:-sh68f90a}" --port "${SINODUDE_PORT:-/dev/ttyUSB0}"
+'''
+
+[tasks.full-image]
+description = "Build a full RK61 Plus flash image (SMK firmware + stock bootloader)"
+depends = ["setup"]
+run = '''
+#!/usr/bin/env bash
+set -euo pipefail
+meson compile -C build royalkludge-rk61plus_default_smk.hex > /dev/null
+python3 utils/make_full_image.py \
+  --firmware build/royalkludge-rk61plus_default_smk.hex \
+  --bootloader assets/keyboards/royalkludge-rk61plus/reference/rk61plus-stock-full.hex \
+  --output build/royalkludge-rk61plus_full.hex
+'''
+
+[tasks.flash-isp-full]
+description = "Write the full RK61 Plus image (firmware + bootloader) over the sinodude-serial ICP programmer"
+depends = ["full-image"]
+run = '''
+#!/usr/bin/env bash
+set -euo pipefail
+hex="${1:-build/royalkludge-rk61plus_full.hex}"
+shift || true
+sinodude write --flash "$hex" -c sinodude-serial -p "${SINODUDE_PART:-sh68f90a}" --port "${SINODUDE_PORT:-/dev/ttyUSB0}" "$@"
+'''
