@@ -42,7 +42,9 @@ class TestBootValues(unittest.TestCase):
     """Boot through the real init path to the main loop, then check P0/P4/P7
     hold the stock boot values (`MOV P0,#24` / `MOV P4,#FD` / `MOV P7,#10`).
     P0/P7 are read direction-aware by the simulator, so only their output bits
-    are asserted: P0.2 (WAKE) + P0.5 (enable) high, P7.4 (enable) high."""
+    are asserted: P0.2 (WAKE) + P0.5 (enable) high, P7.4 (enable) high. P4.0/P4.2
+    are the LED columns C12/C13, which the LED engine actively drives once the
+    tick ISR runs, so the boot assertion masks those two bits out."""
 
     def test_boot_port_values(self):
         kb = Rk61Sim(firmware=RK61_FIRMWARE)
@@ -53,7 +55,9 @@ class TestBootValues(unittest.TestCase):
             kb.close()
         self.assertEqual(p0 & Rk61Sim.P0_OUT_BOOT, 0x24,
                          f"P0 output bits at boot (WAKE + enable high); got 0x{p0:02x}")
-        self.assertEqual(p4, 0xFD, f"P4 boot value; got 0x{p4:02x}")
+        # Bits 0/2 (LED columns C12/C13) are no longer stable at the main loop.
+        self.assertEqual(p4 & 0xFA, 0xF8,
+                         f"P4 boot value (LED columns masked); got 0x{p4:02x}")
         self.assertEqual(p7 & Rk61Sim.P7_OUT_BOOT, 0x10,
                          f"P7 output bits at boot (enable high); got 0x{p7:02x}")
 

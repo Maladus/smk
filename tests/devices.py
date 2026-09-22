@@ -458,11 +458,12 @@ class Rk61Sim(UcsimSession):
     its latch. The boot/park assertions therefore check each port's output bits
     only."""
 
-    # P0CR at boot (P0.2 WAKE + P0.4 MOSI + P0.5 enable are outputs) and after
-    # park (P0.0/P0.1 RC + P0.2 WAKE + P0.4 MOSI + P0.5 enable + P0.6/P0.7
-    # status are outputs).
-    P0_OUT_BOOT = 0x34
-    P0_OUT_PARK = 0xF7
+    # P0 output bits checked at boot and after park. P0.4 (MOSI) is masked out:
+    # the RF bring-up bit-bangs it and leaves it a released-high input, so it no
+    # longer reads its boot latch. Boot keeps P0.2 (WAKE) + P0.5 (enable) high;
+    # park leaves only P0.2 (WAKE) high among the checked bits.
+    P0_OUT_BOOT = 0x24
+    P0_OUT_PARK = 0xE7
 
     # P7CR at boot (P7.4 enable + P7.6 control are outputs) and after park
     # (P7.0 parked-only + P7.4 enable + P7.6/P7.7 control are outputs).
@@ -509,6 +510,36 @@ class Rk61Sim(UcsimSession):
         self.run()
         self.cmd("delete")
         return self.ports()
+
+    def set_xram(self, addr, data):
+        """Write `data` (a byte list) to xdata starting at `addr`."""
+        self.cmd("set mem xram 0x%x %s" % (addr, " ".join("0x%02x" % b for b in data)))
+
+    def call(self, addr):
+        """Cold-invoke the C function at `addr` and return once it RETs onto a
+        NOP sled at 0x9000. The sled is re-staged each call, so a function can be
+        invoked repeatedly against the same session."""
+        self.cmd("set mem rom 0x9000 " + " ".join(["0x00"] * 16))
+        self.cmd("set mem iram 0x86 0x00")   # return low byte
+        self.cmd("set mem iram 0x87 0x90")   # return high byte -> 0x9000
+        self.set_sfr(0x81, 0x87)             # SP
+        self.cmd("pc 0x%x" % addr)
+        self.brk(0x9000)
+        self.run()
+        self.cmd("delete")
+
+    def _static(self, module, name):
+        """Address of a module-static symbol. SDCC mangles file-scope statics as
+        F<module>$<name> with an optional $<scope> suffix; load_symbols' leading-
+        underscore match skips them, so resolve the map line directly."""
+        pat = re.compile(r"^[A-Z]:\s+([0-9A-Fa-f]+)\s+F%s\$%s(?:\$[0-9_$]*)?\s"
+                         % (re.escape(module), re.escape(name)))
+        with open(Path(self.firmware).with_suffix(".map")) as f:
+            for line in f:
+                m = pat.match(line)
+                if m:
+                    return int(m.group(1), 16)
+        raise KeyError("%s$%s not found in .map" % (module, name))
 
     def battery_loop_addr(self):
         """Address of the `JNB P0.0` count-loop head inside user_battery_measure()
