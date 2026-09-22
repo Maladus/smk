@@ -87,7 +87,7 @@ static void led_pwm_park(void);
 
 void indicators_apply_defaults(void)
 {
-    user_settings.led_effect     = FX_RADIAL;
+    user_settings.led_effect     = FX_SOLID_RED;
     user_settings.led_brightness = LED_BRIGHTNESS_DEFAULT;
     user_settings.led_speed      = LED_SPEED_DEFAULT;
 }
