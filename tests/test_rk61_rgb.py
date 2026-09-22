@@ -52,6 +52,10 @@ FX_OFF = 5
 # channel indicator in indicators.c.
 RF_BT1 = 0x01
 
+# indicators.c blink masks (status_pulse_counter bits).
+FN_BLINK_FAST = 0x10
+FN_BLINK_SLOW = 0x40
+
 # PWM DUTY2 register planes, part of the 0xff80-0xfff9 PWM window. 18 channels:
 # PWM00-05, PWM10-15, PWM20-25; DUTY2 low bytes are 0xffd0 + i.
 PWM_DUTY2L = 0xFFD0
@@ -224,14 +228,14 @@ class TestFnChannelIndicator(unittest.TestCase):
     def test_slow_blink_when_connecting(self):
         sim = RgbSim()
         try:
-            for counter in (0x08, 0x18, 0x28):  # status_pulse_counter bit 3 set
+            for counter in (FN_BLINK_SLOW, FN_BLINK_SLOW | 0x01, FN_BLINK_SLOW | 0x10):  # slow bit set
                 sim.stage_fn(RF_BT1, connected=0, paired=1,
                              pairing_active=0, counter=counter)
                 self.assertEqual(sim.fb_blue(FN_ROW, Q_COL), 255,
                                  f"slow blink ON at counter 0x{counter:02x}")
                 self.assertEqual(sim.fb_blue(FN_ROW, W_COL), 0, "W dark")
                 self.assertEqual(sim.fb_blue(FN_ROW, E_COL), 0, "E dark")
-            for counter in (0x00, 0x07, 0x10):  # bit 3 clear
+            for counter in (0x00, 0x01, FN_BLINK_FAST):  # slow bit clear
                 sim.stage_fn(RF_BT1, connected=0, paired=1,
                              pairing_active=0, counter=counter)
                 self.assertEqual(sim.fb_blue(FN_ROW, Q_COL), 0,
@@ -246,12 +250,12 @@ class TestFnChannelIndicator(unittest.TestCase):
         fast blink is reserved for an active pairing sequence."""
         sim = RgbSim()
         try:
-            for counter in (0x08, 0x18, 0x28):  # bit 3 set -> ON
+            for counter in (FN_BLINK_SLOW, FN_BLINK_SLOW | 0x01):  # slow bit set -> ON
                 sim.stage_fn(RF_BT1, connected=0, paired=0,
                              pairing_active=0, counter=counter)
                 self.assertEqual(sim.fb_blue(FN_ROW, Q_COL), 255,
                                  f"slow blink ON at counter 0x{counter:02x}")
-            for counter in (0x00, 0x07, 0x10):  # bit 3 clear -> OFF
+            for counter in (0x00, 0x01):  # slow bit clear -> OFF
                 sim.stage_fn(RF_BT1, connected=0, paired=0,
                              pairing_active=0, counter=counter)
                 self.assertEqual(sim.fb_blue(FN_ROW, Q_COL), 0,
@@ -262,14 +266,14 @@ class TestFnChannelIndicator(unittest.TestCase):
     def test_fast_blink_when_pairing(self):
         sim = RgbSim()
         try:
-            for counter in (0x01, 0x03, 0x05):  # status_pulse_counter bit 0 set
+            for counter in (FN_BLINK_FAST, FN_BLINK_FAST | 0x01, FN_BLINK_FAST | 0x02):  # fast bit set
                 sim.stage_fn(RF_BT1, connected=0, paired=1,
                              pairing_active=1, counter=counter)
                 self.assertEqual(sim.fb_blue(FN_ROW, Q_COL), 255,
                                  f"fast blink ON at counter 0x{counter:02x}")
                 self.assertEqual(sim.fb_blue(FN_ROW, W_COL), 0, "W dark")
                 self.assertEqual(sim.fb_blue(FN_ROW, E_COL), 0, "E dark")
-            for counter in (0x00, 0x02, 0x04):  # bit 0 clear
+            for counter in (0x00, 0x01, 0x02):  # fast bit clear
                 sim.stage_fn(RF_BT1, connected=0, paired=1,
                              pairing_active=1, counter=counter)
                 self.assertEqual(sim.fb_blue(FN_ROW, Q_COL), 0,

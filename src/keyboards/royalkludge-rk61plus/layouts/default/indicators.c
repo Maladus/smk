@@ -48,11 +48,12 @@ enum {
 };
 
 // Channel indicator blink phases. status_pulse_counter advances once per full
-// LED frame (LED_COLS subframes), so:
-//   FN_BLINK_FAST (0x01) -> 2-frame period  (pairing)
-//   FN_BLINK_SLOW (0x08) -> 16-frame period (connecting)
-#define FN_BLINK_FAST 0x01
-#define FN_BLINK_SLOW 0x08
+// LED frame (LED_COLS subframes, ~7 ms/frame), so a mask bit toggles every
+// `mask` frames:
+//   FN_BLINK_FAST (0x10) -> 32-frame period  ~4-5 Hz (pairing)
+//   FN_BLINK_SLOW (0x40) -> 128-frame period ~1 Hz   (selected, no link)
+#define FN_BLINK_FAST 0x10
+#define FN_BLINK_SLOW 0x40
 
 #include LED_GEOMETRY_HEADER
 _Static_assert(LED_GEOMETRY_ROWS == LED_ROWS && LED_GEOMETRY_COLS == LED_COLS, "generated LED geometry size does not match the key matrix");

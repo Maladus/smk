@@ -163,7 +163,9 @@ to that latency, and the pairing window is effectively unbounded. The original
 armed pairing.
 
 The LED side is driven by Timer2 instead of the main loop: ~100 us per matrix
-scan and ~400 us per LED subframe (14 subframes per frame → ~5.6 ms/frame).
+scan and ~400 us per LED subframe (14 subframes per frame → ~5.6 ms/frame). The
+channel indicator blink masks count those frames: `FN_BLINK_FAST = 0x10`
+(~4-5 Hz) and `FN_BLINK_SLOW = 0x40` (~1 Hz).
 
 ## Backlight
 
