@@ -54,16 +54,15 @@
 #define KB_C12 P4_0
 #define KB_C13 P4_2
 
-// Board switches (read active-low; pull-ups enabled). Traced from the stock
-// switch poll (0x7C00): P5.5 selects the band (high = 2.4G, low = BLE) and P5.6
-// low selects wired/USB. The stock never reads an on/off switch - it only gates
-// battery power - so the physical source of P5.6 (mode switch or USB-present
-// detect) does not change the logic.
-#define BAND_SWITCH  P5_5 // 1 = 2.4G, 0 = BLE
-#define WIRED_SWITCH P5_6 // 0 = wired/USB, 1 = wireless
+// Board switches (read active-low; pull-ups enabled). Mapped on hardware:
+//   P5.6 = B/G band switch: B (high) = BLE, G (low) = 2.4G
+//   P5.5 = on/off switch:   on (low) = wireless, off (high) = wired/USB
+// (The stock switch-poll trace in the plan had P5.5/P5.6 swapped.)
+#define BAND_SWITCH  P5_6 // 1 = BLE (B), 0 = 2.4G (G)
+#define POWER_SWITCH P5_5 // 0 = on (wireless), 1 = off (wired/USB)
 
-#define BAND_SWITCH_P5_5  _P5_5
-#define WIRED_SWITCH_P5_6 _P5_6
+#define BAND_SWITCH_P5_6  _P5_6
+#define POWER_SWITCH_P5_5 _P5_5
 
 // Enable group: hub enable + charge enable + 3 more. The stock firmware drives
 // the five pins high at boot and low at park as one group; it never gates them

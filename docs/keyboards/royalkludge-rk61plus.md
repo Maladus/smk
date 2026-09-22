@@ -128,19 +128,19 @@ firmware never gates them individually.
 
 ## Switches
 
-The mode is read as active-low inputs (pull-ups enabled), traced from the stock
-switch-poll routine (`0x7C00`):
+The mode is read from two active-low inputs (pull-ups enabled), mapped on
+hardware:
 
-| Input | Pin | Stock read | Meaning |
+| Input | Pin | Levels | Meaning |
 | --- | --- | --- | --- |
-| band | P5.5 | `JNB P5.5` at `0x7C50` | high = 2.4G, low = BLE |
-| wired | P5.6 | `JNB P5.6` at `0x7C2A` / `0x7C3D` (debounced) | low = wired/USB, high = wireless |
+| band | P5.6 | B = high, G = low | B → BLE, G → 2.4G |
+| on/off | P5.5 | on = low, off = high | off → wired/USB, on → wireless |
 
-The two inputs select the mode exactly as the stock does: P5.5 high → 2.4G;
-P5.5 low + P5.6 high → BLE; P5.5 low + P5.6 low → USB. The stock never reads an
-on/off switch, so it only gates battery power. The physical source of P5.6 (a
-mode switch or a USB-present detect) is not bench-confirmed; the firmware logic
-is independent of it.
+The two inputs select the mode: on/off **off** → wired/USB (the cable powers the
+board); on/off **on** + B → BLE (last BT channel); on/off **on** + G → direct 2.4G.
+The stock switch-poll trace (`0x7C00`) in the original plan had P5.5/P5.6 swapped;
+the hardware mapping above was confirmed by flipping the switches and reading the
+pins. When off, the radio is not brought up at all (`main()` skips `rf_init()`).
 
 ## Backlight
 

@@ -66,16 +66,27 @@ static rf_mode_t kb_keycode_to_rf_mode(uint16_t keycode)
     }
 }
 
-// P5.5: high = direct 2.4G, low = BLE.
+// P5.6 = B/G band switch: B (high) = BLE, G (low) = 2.4G.
 static bool kb_band_24g(void)
 {
-    return BAND_SWITCH != 0;
+    return BAND_SWITCH == 0;
 }
 
-// P5.6 low = wired/USB (stock 0x0927==0 -> mode 1). High = wireless.
+// P5.5 = on/off switch: off (high) = wired/USB, on (low) = wireless.
 static bool kb_wired(void)
 {
-    return WIRED_SWITCH == 0;
+    return POWER_SWITCH == 1;
+}
+
+// The radio only needs to run when the on/off switch is on (wireless); when off
+// the board is wired/USB, so main() can skip rf_init().
+bool kb_radio_enabled(void)
+{
+#    ifdef RF_ENABLED
+    return !kb_wired();
+#    else
+    return false;
+#    endif
 }
 
 // Switch the RF link and mirror it into the keyboard_state the channel
@@ -94,21 +105,21 @@ static void kb_set_link(rf_mode_t link, bool persist)
     keyboard_state.rf_link = (uint8_t)link;
 }
 
-// Apply the switch state, matching the stock's mode selection (0x7C00):
-//   P5.5 high            -> 2.4G
-//   P5.5 low, P5.6 high  -> BLE (last BT channel)
-//   P5.5 low, P5.6 low   -> wired/USB
+// Apply the switch state:
+//   on/off off (P5.5 high)      -> wired/USB
+//   on + G (P5.6 low)           -> 2.4G
+//   on + B (P5.6 high)          -> BLE (last BT channel)
 static void kb_apply_band(void)
 {
-    if (kb_band_24g()) {
-        conn_mode = KEYBOARD_CONN_MODE_RF;
-        kb_set_link(RF_MODE_2_4G, false);
-        return;
-    }
-
     if (kb_wired()) {
         conn_mode = KEYBOARD_CONN_MODE_USB;
         rf_apply_usb_mode();
+        return;
+    }
+
+    if (kb_band_24g()) {
+        conn_mode = KEYBOARD_CONN_MODE_RF;
+        kb_set_link(RF_MODE_2_4G, false);
         return;
     }
 
@@ -170,8 +181,10 @@ bool kb_process_record(uint16_t keycode, bool key_pressed)
         case LNK_BT1:
         case LNK_BT2:
         case LNK_BT3:
-            // On the 2.4G band the BLE channel keys are disabled.
-            if (kb_band_24g()) {
+            dprintf("fnch %04x %u b24=%u w=%u m=%u rl=%u c=%u p=%u\r\n", keycode, (unsigned)key_pressed, (unsigned)kb_band_24g(), (unsigned)kb_wired(), (unsigned)conn_mode, (unsigned)keyboard_state.rf_link, (unsigned)keyboard_state.connected, (unsigned)keyboard_state.paired);
+
+            // On the direct 2.4G band the BLE channel keys are disabled.
+            if (!kb_wired() && kb_band_24g()) {
                 return false;
             }
 
@@ -217,9 +230,32 @@ bool kb_process_record(uint16_t keycode, bool key_pressed)
     return true;
 }
 
+// Temporary bring-up aid: log the candidate switch/status input pins whenever
+// they change, so the physical switch positions can be mapped to pin levels.
+static void kb_debug_switch_pins(void)
+{
+    static uint8_t last_p0, last_p4, last_p5, last_p7;
+    static bool    first = true;
+
+    const uint8_t p0 = P0 & 0xC0; // P0.6/P0.7 status inputs
+    const uint8_t p4 = P4 & 0x02; // P4.1 ACK
+    const uint8_t p5 = P5 & 0x60; // P5.5 on/off, P5.6 B/G band
+    const uint8_t p7 = P7 & 0xE0; // P7.5-P7.7 status/control
+
+    if (first || p0 != last_p0 || p4 != last_p4 || p5 != last_p5 || p7 != last_p7) {
+        dprintf("sw p0=%02x p4=%02x p5=%02x p7=%02x b24=%u w=%u\r\n", (unsigned)P0, (unsigned)P4, (unsigned)P5, (unsigned)P7, (unsigned)kb_band_24g(), (unsigned)kb_wired());
+        last_p0 = p0;
+        last_p4 = p4;
+        last_p5 = p5;
+        last_p7 = p7;
+        first   = false;
+    }
+}
+
 void kb_update_switches()
 {
 #ifdef RF_ENABLED
+    kb_debug_switch_pins();
     static uint16_t band_debounce;
     static uint16_t wired_debounce;
     static int8_t   band_24g_last = -1;

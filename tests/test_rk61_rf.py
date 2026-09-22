@@ -63,7 +63,8 @@ class RfTestCase(unittest.TestCase):
     def setUp(self):
         self.kb = Rk61Sim(firmware=RK61_FIRMWARE)
         self.kb.boot()
-        self.kb.set_band_24g(False)  # P5.5 low = BLE
+        self.kb.set_band_24g(False)  # P5.6 high (B) = BLE
+        self.kb.set_wired(False)     # P5.5 low = on (wireless)
         self.slave = RfSlave(self.kb)
         self.slave.install()
 

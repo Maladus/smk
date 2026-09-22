@@ -43,15 +43,17 @@ class Rk61RfSim(Rk61Sim):
         self.cmd("set mem xram 0x%x 0x02" % self._a("usb_device_state"))
 
     def set_band_24g(self, on):
-        """Stage the P5.5 band switch the firmware samples: high = direct 2.4G,
-        low = BLE (pull-up idles high, so BLE is the driven-low state)."""
-        self.set_pin(P5, 0xFF if on else 0xDF)
-
-    def set_wired(self, on):
-        """Stage the P5.6 wired/USB input: low = wired (stock mode 1), high =
-        wireless. Read-modify-write so it composes with set_band_24g()."""
+        """Stage the P5.6 B/G band switch the firmware samples: G (low) =
+        direct 2.4G, B (high) = BLE (pull-up idles high). Read-modify-write so it
+        composes with set_wired()."""
         cur = self.get_xram(self.PIN_STAGE[P5], 1)[0]
         self.set_pin(P5, (cur & ~0x40) if on else (cur | 0x40))
+
+    def set_wired(self, on):
+        """Stage the P5.5 on/off switch: off (high) = wired/USB, on (low) =
+        wireless. Read-modify-write so it composes with set_band_24g()."""
+        cur = self.get_xram(self.PIN_STAGE[P5], 1)[0]
+        self.set_pin(P5, (cur | 0x20) if on else (cur & ~0x20))
 
     def cold_call(self, addr, slave=None, dpl=None, dph=None, b=None, stack_arg=None):
         """Cold-invoke `addr` and return once it RETs onto the 0x9000 sled,

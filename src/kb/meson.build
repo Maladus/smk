@@ -5,4 +5,5 @@ src_kb += files(
     'kb_process_record.c',
     'kb_update_switches.c',
     'kb_update.c',
+    'kb_radio_enabled.c',
 )

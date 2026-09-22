@@ -97,7 +97,11 @@ void main(void)
         watchdog_kick();
 
 #ifdef RF_ENABLED
-        if (!rf_up) {
+        // Bring the radio up from the main loop, like the stock firmware: USB is
+        // already connected and serviced, so the host's enumeration never waits
+        // on the RF init. Skip it entirely while the on/off switch is off (the
+        // board is wired/USB then); bring it up if the user later switches on.
+        if (!rf_up && kb_radio_enabled()) {
             rf_up = true;
             rf_init();
             restore_rf_link();
