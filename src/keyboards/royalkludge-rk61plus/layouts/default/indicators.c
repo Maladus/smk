@@ -105,6 +105,60 @@ void indicators_validate_settings(void)
     }
 }
 
+void indicators_next_effect(void)
+{
+    if (++user_settings.led_effect > FX_OFF) {
+        user_settings.led_effect = 0;
+    }
+    settings_mark_dirty();
+}
+
+void indicators_prev_effect(void)
+{
+    if (user_settings.led_effect == 0) {
+        user_settings.led_effect = FX_OFF;
+    } else {
+        user_settings.led_effect--;
+    }
+    settings_mark_dirty();
+}
+
+void indicators_brightness_up(void)
+{
+    if (user_settings.led_brightness > (uint8_t)(255 - LED_BRIGHTNESS_STEP)) {
+        user_settings.led_brightness = 255;
+    } else {
+        user_settings.led_brightness = (uint8_t)(user_settings.led_brightness + LED_BRIGHTNESS_STEP);
+    }
+    settings_mark_dirty();
+}
+
+void indicators_brightness_down(void)
+{
+    if (user_settings.led_brightness < LED_BRIGHTNESS_STEP) {
+        user_settings.led_brightness = 0;
+    } else {
+        user_settings.led_brightness = (uint8_t)(user_settings.led_brightness - LED_BRIGHTNESS_STEP);
+    }
+    settings_mark_dirty();
+}
+
+void indicators_speed_up(void)
+{
+    if (user_settings.led_speed < LED_SPEED_MAX) {
+        user_settings.led_speed++;
+    }
+    settings_mark_dirty();
+}
+
+void indicators_speed_down(void)
+{
+    if (user_settings.led_speed > LED_SPEED_MIN) {
+        user_settings.led_speed--;
+    }
+    settings_mark_dirty();
+}
+
 void indicators_init(void)
 {
     memset(led_fb, 0, sizeof(led_fb));

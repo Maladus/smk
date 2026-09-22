@@ -44,6 +44,9 @@ def setUpModule():
 
 # led_effect_t (src/smk/led_effect.h): FX_SOLID paints every key bright white.
 FX_SOLID = 3
+# FX_SOLID_RED is the RK61 default; FX_OFF (== FX_COUNT) is the end of the cycle.
+FX_SOLID_RED = 4
+FX_OFF = 5
 
 # rf_mode_t (src/peripherals/bk3632/rf_controller.h), duplicated by the Fn
 # channel indicator in indicators.c.
@@ -267,6 +270,58 @@ class TestFnChannelIndicator(unittest.TestCase):
             self.assertEqual(d2[8], 255, "Q blue reaches the PWM12 sink")
             self.assertEqual(d2[:8] + d2[9:], [0] * 17,
                              "no other sink is lit for the Q column")
+        finally:
+            sim.close()
+
+
+class TestEffectControls(unittest.TestCase):
+    """The Fn effect/brightness/speed controls mutate user_settings and clamp at
+    the ends. The functions are cold-invoked directly, like the engine tests."""
+
+    def _settings(self, sim):
+        return sim.kb.get_xram(sim.kb._a("user_settings"), 3)
+
+    def test_next_effect_cycles_and_wraps(self):
+        sim = RgbSim()
+        try:
+            sim.kb.set_xram(sim.kb._a("user_settings"), [FX_SOLID_RED, 255, 4])
+            sim.kb.call(sim.kb._a("indicators_next_effect"))
+            self.assertEqual(self._settings(sim)[0], FX_OFF)
+            sim.kb.call(sim.kb._a("indicators_next_effect"))
+            self.assertEqual(self._settings(sim)[0], 0, "wraps back to the first effect")
+        finally:
+            sim.close()
+
+    def test_prev_effect_wraps_to_off(self):
+        sim = RgbSim()
+        try:
+            sim.kb.set_xram(sim.kb._a("user_settings"), [0, 255, 4])
+            sim.kb.call(sim.kb._a("indicators_prev_effect"))
+            self.assertEqual(self._settings(sim)[0], FX_OFF)
+        finally:
+            sim.close()
+
+    def test_brightness_clamps_at_both_ends(self):
+        sim = RgbSim()
+        try:
+            sim.kb.set_xram(sim.kb._a("user_settings"), [FX_SOLID_RED, 255, 4])
+            sim.kb.call(sim.kb._a("indicators_brightness_up"))
+            self.assertEqual(self._settings(sim)[1], 255)
+            sim.kb.set_xram(sim.kb._a("user_settings") + 1, [0])
+            sim.kb.call(sim.kb._a("indicators_brightness_down"))
+            self.assertEqual(self._settings(sim)[1], 0)
+        finally:
+            sim.close()
+
+    def test_speed_clamps_at_both_ends(self):
+        sim = RgbSim()
+        try:
+            sim.kb.set_xram(sim.kb._a("user_settings"), [FX_SOLID_RED, 255, 16])
+            sim.kb.call(sim.kb._a("indicators_speed_up"))
+            self.assertEqual(self._settings(sim)[2], 16)
+            sim.kb.set_xram(sim.kb._a("user_settings") + 2, [1])
+            sim.kb.call(sim.kb._a("indicators_speed_down"))
+            self.assertEqual(self._settings(sim)[2], 1)
         finally:
             sim.close()
 

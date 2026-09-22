@@ -13,6 +13,13 @@
 #    include "rf_controller.h"
 #endif
 
+extern void indicators_next_effect(void);
+extern void indicators_prev_effect(void);
+extern void indicators_brightness_up(void);
+extern void indicators_brightness_down(void);
+extern void indicators_speed_up(void);
+extern void indicators_speed_down(void);
+
 // Where keyboard reports go. RF (BLE or 2.4G) is the primary link; a short press
 // on the active, connected BT channel toggles to USB, and USB is the fallback
 // while no BLE channel is active.
@@ -103,6 +110,41 @@ void kb_init()
 
 bool kb_process_record(uint16_t keycode, bool key_pressed)
 {
+    switch (keycode) {
+        case FX_PREV:
+            if (key_pressed) {
+                indicators_prev_effect();
+            }
+            return false;
+        case FX_NEXT:
+            if (key_pressed) {
+                indicators_next_effect();
+            }
+            return false;
+        case SPD_DN:
+            if (key_pressed) {
+                indicators_speed_down();
+            }
+            return false;
+        case SPD_UP:
+            if (key_pressed) {
+                indicators_speed_up();
+            }
+            return false;
+        case BRI_DN:
+            if (key_pressed) {
+                indicators_brightness_down();
+            }
+            return false;
+        case BRI_UP:
+            if (key_pressed) {
+                indicators_brightness_up();
+            }
+            return false;
+        default:
+            break;
+    }
+
 #ifdef RF_ENABLED
     switch (keycode) {
         case LNK_BT1:

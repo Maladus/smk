@@ -155,6 +155,14 @@ it to **DUTY2** — so DUTY2 is the animated duty and DUTY1 is the fixed on-time
 Because the LED columns share the key-matrix column pins, the matrix scan and the
 LED scan must be time-multiplexed.
 
+Backlight controls live on the Fn layer, next to the BT channel keys:
+
+| Keys | Action |
+| --- | --- |
+| `Fn`+`R` / `Fn`+`T` | previous / next effect |
+| `Fn`+`Y` / `Fn`+`U` | animation speed down / up |
+| `Fn`+`I` / `Fn`+`O` | brightness down / up |
+
 The GPIO pins P4.3, P4.5, P4.6, P0.5, P7.4 are not part of the RGB matrix (no
 PWM channel maps to them) — they are driven in the "park" routine and are likely
 USB-hub/charging control lines.

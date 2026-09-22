@@ -155,5 +155,12 @@ enum custom_keycodes {
     LNK_BT2,
     LNK_BT3,
 
+    FX_PREV, // previous RGB effect
+    FX_NEXT, // next RGB effect
+    SPD_DN,  // animation speed down
+    SPD_UP,  // animation speed up
+    BRI_DN,  // backlight brightness down
+    BRI_UP,  // backlight brightness up
+
     KB_SAFE_RANGE,
 };
