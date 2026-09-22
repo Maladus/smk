@@ -40,19 +40,27 @@ bool kb_pairing_active(void)
     return pairing_active;
 }
 
+// True while reports are routed over the RF link (not USB). The channel
+// indicator uses this so a stale connected=1 from before a USB switch does not
+// keep the BT key lit.
+bool kb_rf_mode_active(void)
+{
+    return conn_mode == KEYBOARD_CONN_MODE_RF;
+}
+
 #ifdef RF_ENABLED
 // Hold time (in main-loop kb_update() ticks) before Fn+Q/W/E starts pairing.
-// kb_update() runs at ~100 Hz on this board, so 300 ticks is ~3 s.
-#    define LINK_PAIRING_HOLD_TICKS 300
-// How long the channel indicator fast-blinks after a pairing command. The link
-// is usually already connected, so this cannot key off connected/paired.
-#    define PAIRING_BLINK_TICKS 300
+// Matches the stock pairing counter (0x8C20 increments XRAM 0x0930 to 0x96);
+// kb_update() runs at ~100 Hz on this board, so 150 ticks is ~1.5 s.
+#    define LINK_PAIRING_HOLD_TICKS 150
+// How long the channel indicator fast-blinks after a pairing command is no
+// longer fixed: it blinks for the whole pairing exchange and clears once the
+// link is bound, the channel is switched, or the link drops back to USB.
 // Main-loop iterations a changed band-switch level must hold before it is
 // accepted.
 #    define SLIDER_DEBOUNCE_ITERS 256
 
 static uint16_t link_hold_ticks;
-static uint16_t pairing_blink_ticks;
 static uint16_t link_hold_keycode;
 static bool     link_pairing_armed;
 static bool     link_press_was_active;
@@ -99,6 +107,18 @@ static void kb_set_link(rf_mode_t link, bool persist)
     keyboard_state.rf_link = (uint8_t)link;
 }
 
+// Drop the RF link and route reports over USB. Clear the RF-derived state so
+// the channel indicator does not keep showing the disabled link as connected:
+// rf_link_supervisor() is not polled in USB mode, so keyboard_state.connected
+// would otherwise stay at its last value.
+static void kb_enter_usb_mode(void)
+{
+    conn_mode                = KEYBOARD_CONN_MODE_USB;
+    keyboard_state.connected = 0;
+    pairing_active           = false;
+    rf_apply_usb_mode();
+}
+
 // Apply the switch state:
 //   on/off off (P5.5 high)      -> wired/USB
 //   on + G (P5.6 low)           -> 2.4G
@@ -106,8 +126,7 @@ static void kb_set_link(rf_mode_t link, bool persist)
 static void kb_apply_band(void)
 {
     if (kb_wired()) {
-        conn_mode = KEYBOARD_CONN_MODE_USB;
-        rf_apply_usb_mode();
+        kb_enter_usb_mode();
         return;
     }
 
@@ -188,12 +207,10 @@ bool kb_process_record(uint16_t keycode, bool key_pressed)
                     // active, connected channel it disables BLE and falls back
                     // to USB when a host is attached.
                     if (link_pairing_armed && link_press_was_active && usb_is_configured()) {
-                        conn_mode = KEYBOARD_CONN_MODE_USB;
-                        rf_apply_usb_mode();
+                        kb_enter_usb_mode();
                     }
                     link_hold_keycode  = 0;
                     link_pairing_armed = false;
-                    pairing_active     = false;
                 }
                 return false;
             }
@@ -213,9 +230,12 @@ bool kb_process_record(uint16_t keycode, bool key_pressed)
             if (conn_mode == KEYBOARD_CONN_MODE_USB) {
                 // Re-enable BLE on this channel.
                 kb_set_link(kb_keycode_to_rf_mode(keycode), true);
-                conn_mode = KEYBOARD_CONN_MODE_RF;
+                conn_mode      = KEYBOARD_CONN_MODE_RF;
+                pairing_active = false;
                 rf_kbd_lazy_state_init();
             } else if (!link_press_was_active) {
+                // Switching channel abandons any pairing in progress.
+                pairing_active = false;
                 kb_set_link(kb_keycode_to_rf_mode(keycode), true);
             }
             return false;
@@ -328,29 +348,25 @@ void kb_update()
             keyboard_state.paired    = 0;
             keyboard_state.connected = 0;
             pairing_active           = true;
-            pairing_blink_ticks      = PAIRING_BLINK_TICKS;
             // Wipe the old bond first, or the radio re-adopts it instead of
             // pairing the new host.
             rf_wipe_bonds();
-            rf_set_link_pairing(link, &keyboard_state);
+            rf_set_link_pairing(link);
             link_pairing_armed = false;
         }
     }
-
-    // The indicator fast-blinks while pairing; stop once the link comes up or a
-    // bond is established (then it shows solid/slow-blink instead).
-    // Fast-blink for a fixed window after a pairing command, then fall back to
-    // the connected/paired state. (The link is usually already connected when a
-    // re-pair is requested, so clearing on connected made the blink invisible.)
-    if (pairing_blink_ticks != 0) {
-        pairing_blink_ticks--;
-    }
-    pairing_active = (pairing_blink_ticks != 0);
 
     if (conn_mode == KEYBOARD_CONN_MODE_RF) {
         rf_link_supervisor(&keyboard_state);
         rf_send_pending_flush();
         rf_blanking_tick();
+    }
+
+    // The fast blink lasts the whole pairing exchange and clears once the new
+    // bond is established (paired). A channel switch or a drop back to USB
+    // clears it earlier (kb_process_record / kb_apply_band).
+    if (pairing_active && keyboard_state.paired) {
+        pairing_active = false;
     }
 #endif
 }

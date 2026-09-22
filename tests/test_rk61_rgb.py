@@ -133,13 +133,13 @@ class RgbSim:
         base = self.kb._static("indicators", "led_fb")
         return self.kb.get_xram(base + row * 42 + 2 * 14 + col, 1)[0]
 
-    def stage_fn(self, rf_link, connected, paired, pairing_active, counter):
+    def stage_fn(self, rf_link, connected, paired, pairing_active, counter, fn_held=1):
         """Stage the RF state the Fn channel indicator reads, then repaint."""
         ks = self.kb._a("keyboard_state")
         self.kb.set_xram(ks + 1, [rf_link])                # rf_link
         self.kb.set_xram(ks + 4, [connected])              # connected
         self.kb.set_xram(ks + 5, [paired])                 # paired
-        self.kb.set_xram(self.kb._a("action_layer"), [1])  # Fn held
+        self.kb.set_xram(self.kb._a("action_layer"), [fn_held])
         self.kb.set_xram(self.kb._static("kb", "pairing_active"), [pairing_active])
         self.kb.set_xram(self.kb._static("indicators", "status_pulse_counter"), [counter])
         self.render()
@@ -225,6 +225,19 @@ class TestFnChannelIndicator(unittest.TestCase):
         finally:
             sim.close()
 
+    def test_dark_in_usb_mode(self):
+        """A stale connected=1 must not keep the BT key lit once the RF link is
+        disabled for USB (kb_rf_mode_active() gates the overlay)."""
+        sim = RgbSim()
+        try:
+            # KEYBOARD_CONN_MODE_USB == 1 (kb.c).
+            sim.kb.set_xram(sim.kb._static("kb", "conn_mode"), [1])
+            sim.stage_fn(RF_BT1, connected=1, paired=1, pairing_active=0, counter=0)
+            self.assertEqual(sim.fb_blue(FN_ROW, Q_COL), 0,
+                             "USB mode must not show the disabled RF link as connected")
+        finally:
+            sim.close()
+
     def test_slow_blink_when_connecting(self):
         sim = RgbSim()
         try:
@@ -280,6 +293,53 @@ class TestFnChannelIndicator(unittest.TestCase):
                                  f"fast blink OFF at counter 0x{counter:02x}")
                 self.assertEqual(sim.fb_blue(FN_ROW, W_COL), 0, "W dark")
                 self.assertEqual(sim.fb_blue(FN_ROW, E_COL), 0, "E dark")
+        finally:
+            sim.close()
+
+    def test_fast_blink_without_fn(self):
+        """The pairing fast blink overlays without Fn, so a pairing sequence is
+        visible until it succeeds."""
+        sim = RgbSim()
+        try:
+            for counter in (FN_BLINK_FAST, FN_BLINK_FAST | 0x01):  # fast bit set
+                sim.stage_fn(RF_BT1, connected=0, paired=0,
+                             pairing_active=1, counter=counter, fn_held=0)
+                self.assertEqual(sim.fb_blue(FN_ROW, Q_COL), 255,
+                                 f"pairing blink ON without Fn at 0x{counter:02x}")
+            for counter in (0x00, 0x01):  # fast bit clear
+                sim.stage_fn(RF_BT1, connected=0, paired=0,
+                             pairing_active=1, counter=counter, fn_held=0)
+                self.assertEqual(sim.fb_blue(FN_ROW, Q_COL), 0,
+                                 f"pairing blink OFF without Fn at 0x{counter:02x}")
+        finally:
+            sim.close()
+
+    def test_slow_blink_without_fn(self):
+        """A selected channel with no link slow-blinks without Fn, so a
+        reconnect stays visible until it succeeds."""
+        sim = RgbSim()
+        try:
+            sim.stage_fn(RF_BT1, connected=0, paired=1, pairing_active=0,
+                         counter=FN_BLINK_SLOW, fn_held=0)
+            self.assertEqual(sim.fb_blue(FN_ROW, Q_COL), 255,
+                             "reconnect slow blink ON without Fn")
+            sim.stage_fn(RF_BT1, connected=0, paired=1, pairing_active=0,
+                         counter=0, fn_held=0)
+            self.assertEqual(sim.fb_blue(FN_ROW, Q_COL), 0,
+                             "reconnect slow blink OFF without Fn")
+        finally:
+            sim.close()
+
+    def test_solid_connected_stays_fn_only(self):
+        """The steady connected state must not permanently override the effect
+        when Fn is not held."""
+        sim = RgbSim()
+        try:
+            sim.set_settings(FX_SOLID_RED, brightness=255)
+            sim.stage_fn(RF_BT1, connected=1, paired=1, pairing_active=0,
+                         counter=0, fn_held=0)
+            self.assertEqual(sim.fb_rgb(FN_ROW, Q_COL), [255, 0, 0],
+                             "without Fn a connected channel leaves the effect visible")
         finally:
             sim.close()
 

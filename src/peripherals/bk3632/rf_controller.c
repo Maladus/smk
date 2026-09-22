@@ -113,7 +113,7 @@ void rf_factory_reset_bonds(void)
 // sleep/re-init cycle, so it is cheap enough for a long-press pairing.
 void rf_wipe_bonds(void)
 {
-    rf_cmd_03(2); // wipe stored bonds
+    rf_cmd_03(3); // wipe stored bonds (stock 0xABD2 uses param 3, not 2)
     delay_ms(100);
 }
 
@@ -282,41 +282,18 @@ void rf_blanking_tick(void)
     rf_send_kro_report(buf);
     blanking_active = false;
 }
-static uint8_t pairing_status_bytes[2];
-static uint8_t pairing_paired_now;
-
-void rf_set_link_pairing(rf_mode_t link, __xdata keyboard_state_t *keyboard)
+// Put the radio into pairing mode for `link`. Fire-and-forget, matching the
+// stock pairing path (0xAA14): the BK3632 owns the pairing exchange, and
+// rf_link_supervisor() reads the resulting status and re-asserts the link once
+// it reports paired. The old bond is wiped by the caller before this runs.
+void rf_set_link_pairing(rf_mode_t link)
 {
     commanded_link = (uint8_t)link;
 
     rf_set_link_mode(link, 1);
-
-    pairing_paired_now = 0;
-    delay_ms(100);
-    for (uint8_t tries = 10; tries > 0; tries--) {
-        rf_wake_nudge();
-        delay_ms(10);
-        if (rf_get_status(pairing_status_bytes) && (pairing_status_bytes[0] & 0x80)) {
-            keyboard->battery_level = pairing_status_bytes[0] & 0x07;
-            keyboard->led_state     = pairing_status_bytes[1] & ((1 << 0) | (1 << 1) | (1 << 2));
-            keyboard->connected     = (pairing_status_bytes[1] >> 3) & 1;
-            keyboard->paired        = (pairing_status_bytes[1] >> 4) & 1;
-            keyboard->low_power     = (pairing_status_bytes[1] >> 7) & 1;
-            keyboard->rf_link       = ((pairing_status_bytes[1] & ((1 << 5) | (1 << 6))) >> 5);
-            if (keyboard->paired) {
-                pairing_paired_now = 1;
-                break;
-            }
-        }
-        delay_ms(20);
-    }
-
-    if (pairing_paired_now) {
-        delay_ms(50);
-        rf_reassert_link(link);
-    } else {
-        pairing_window_polls = RF_PAIRING_WINDOW_POLLS;
-    }
+    // Hold off the supervisor's pairing=0 re-assert so the pairing window is not
+    // cut short before the new host is adopted.
+    pairing_window_polls = RF_PAIRING_WINDOW_POLLS;
 }
 
 bool rf_get_status(uint8_t status_bytes[2])

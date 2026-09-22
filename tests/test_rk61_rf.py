@@ -119,14 +119,15 @@ class TestLinkSelection(RfTestCase):
 
 class TestPairing(RfTestCase):
     def test_long_press_sends_pairing_command(self):
-        # A ready, paired, not-yet-connected link so rf_set_link_pairing() returns
-        # after the first poll (status1 bit3=connected=0, bit4=paired=1).
+        # A ready, paired, not-yet-connected link. rf_set_link_pairing() is
+        # fire-and-forget (stock 0xAA14); rf_link_supervisor() then polls the
+        # status and re-asserts, so paired comes from the reply.
         self.slave.set_status(0x87, 0x10)
 
         self.kb.call_key(LNK_BT1, True, self.slave)  # press arms the hold timer
         self.slave.frames.clear()
         # Jump the hold counter to the threshold so one kb_update() pairs.
-        self.kb.set_xram(self.kb._static("kb", "link_hold_ticks"), [0x2C, 0x01])  # 300
+        self.kb.set_xram(self.kb._static("kb", "link_hold_ticks"), [0x96, 0x00])  # 150 (LINK_PAIRING_HOLD_TICKS)
         self.kb.cold_call(self.kb._a("kb_update"), slave=self.slave)
 
         pairing = [f for f in self.link_frames() if f[3] == 1]
@@ -135,21 +136,40 @@ class TestPairing(RfTestCase):
 
         wipe = [f for f in self.slave.frames if f[2] == RF_CMD_BONDS]
         self.assertTrue(wipe, "a long press must clear the old bond before pairing")
-        self.assertEqual(wipe[0][3], 2, "rf_cmd_03(2) wipes the stored bonds")
+        self.assertEqual(wipe[0][3], 3, "rf_cmd_03(3) wipes the stored bonds (stock)")
 
         self.assertEqual(self.state_byte(4), 0, "connected comes from the status reply")
         self.assertEqual(self.state_byte(5), 1, "paired comes from the status reply")
 
-    def test_pairing_blink_persists_while_link_connected(self):
-        """The indicator fast-blinks for a window after the pairing command even
-        when the link is already connected - clearing on connected hid it."""
-        self.slave.set_status(0x87, 0x38)  # connected BT1
+    def test_pairing_blink_stays_until_bound(self):
+        """The fast blink persists for the whole pairing exchange: an unpaired
+        status reply (the old bond was wiped) leaves pairing_active set."""
+        self.slave.set_status(0x87, 0x00)  # ready, not paired
         self.kb.call_key(LNK_BT1, True, self.slave)
-        self.kb.set_xram(self.kb._static("kb", "link_hold_ticks"), [0x2C, 0x01])  # 300
+        self.kb.set_xram(self.kb._static("kb", "link_hold_ticks"), [0x96, 0x00])  # 150 (LINK_PAIRING_HOLD_TICKS)
         self.kb.cold_call(self.kb._a("kb_update"), slave=self.slave)
 
         self.assertEqual(self.kb.get_xram(self.kb._static("kb", "pairing_active"), 1)[0], 1,
-                         "pairing_active must stay set right after the pairing command")
+                         "pairing_active must stay set until the link is bound")
+
+    def test_pairing_blink_clears_when_bound(self):
+        """Once the status reports a new bond (paired), the fast blink stops and
+        the indicator falls back to solid/slow."""
+        self.slave.set_status(0x87, 0x10)  # paired, not connected
+        self.kb.call_key(LNK_BT1, True, self.slave)
+        self.kb.set_xram(self.kb._static("kb", "link_hold_ticks"), [0x96, 0x00])  # 150 (LINK_PAIRING_HOLD_TICKS)
+        self.kb.cold_call(self.kb._a("kb_update"), slave=self.slave)
+
+        self.assertEqual(self.kb.get_xram(self.kb._static("kb", "pairing_active"), 1)[0], 0,
+                         "pairing_active must clear once the link is bound")
+
+    def test_channel_switch_clears_pairing_blink(self):
+        """Pressing another channel key abandons the pairing exchange."""
+        self.kb.set_xram(self.kb._static("kb", "pairing_active"), [1])
+        self.kb.call_key(LNK_BT2, True, self.slave)  # BT2 is not the active channel
+
+        self.assertEqual(self.kb.get_xram(self.kb._static("kb", "pairing_active"), 1)[0], 0,
+                         "switching channel must clear the pairing blink")
 
 
 class TestUsbFallback(RfTestCase):
@@ -175,6 +195,13 @@ class TestUsbFallback(RfTestCase):
         self.assertEqual(usb[0][3], 1, "rf_cmd_06(1) disables the RF link")
         self.assertEqual(self.kb.get_xram(self.kb._static("kb", "conn_mode"), 1)[0], 1,
                          "conn_mode must switch to USB")
+
+    def test_usb_toggle_clears_stale_connected(self):
+        """The supervisor is not polled in USB mode, so the last connected=1
+        must be cleared explicitly or the channel indicator stays solid."""
+        self._toggle_to_usb()
+        self.assertEqual(self.state_byte(4), 0,
+                         "connected must clear when the RF link is disabled for USB")
 
     def test_short_press_on_active_disconnected_toggles_to_usb(self):
         """A short press on the active channel must toggle back to USB even when

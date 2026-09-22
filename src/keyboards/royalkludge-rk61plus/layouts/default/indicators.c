@@ -75,6 +75,7 @@ extern uint8_t action_layer;
 // Pairing-active flag owned by kb.c; the RF phase drives it while a long-press
 // pairing sequence runs.
 extern bool kb_pairing_active(void);
+extern bool kb_rf_mode_active(void);
 
 void        indicators_pwm_enable(void);
 void        indicators_pwm_disable(void);
@@ -245,6 +246,10 @@ static uint8_t fn_active_col(void)
 
 static uint8_t fn_channel_blue(void)
 {
+    if (!kb_rf_mode_active()) {
+        // USB mode: the RF link is disabled, so no channel indicator.
+        return 0;
+    }
     if (kb_pairing_active()) {
         // Pairing in progress (long-press Fn+Q/W/E): fast blink.
         return (status_pulse_counter & FN_BLINK_FAST) ? 255 : 0;
@@ -256,6 +261,21 @@ static uint8_t fn_channel_blue(void)
     // Selected but no link yet (paired or not): slow blink while it connects.
     // Fast blink is reserved for an active pairing sequence.
     return (status_pulse_counter & FN_BLINK_SLOW) ? 255 : 0;
+}
+
+// Whether the channel overlay is drawn. It shows while Fn is held, and - without
+// Fn - for the two blink states (pairing, or a selected channel with no link) so
+// a pairing/reconnect sequence stays visible until it succeeds. The steady
+// connected state stays Fn-only so it does not permanently override the effect.
+static bool fn_channel_overlay_visible(void)
+{
+    if (action_layer != 0) {
+        return true;
+    }
+    if (!kb_rf_mode_active()) {
+        return false;
+    }
+    return kb_pairing_active() || !keyboard_state.connected;
 }
 
 static void led_regen_one(void)
@@ -273,9 +293,10 @@ static void led_regen_one(void)
         }
     }
 
-    // Fn held: overlay the active BT channel key (Q/W/E) with its status, and
-    // leave the rest of the effect running underneath.
-    if (action_layer != 0 && regen_row == FN_ROW && regen_col == fn_active_col()) {
+    // Fn held, or a pairing/reconnect blink: overlay the active BT channel key
+    // (Q/W/E) with its status, and leave the rest of the effect running
+    // underneath.
+    if (fn_channel_overlay_visible() && regen_row == FN_ROW && regen_col == fn_active_col()) {
         r = 0;
         g = 0;
         b = fn_channel_blue();

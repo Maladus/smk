@@ -74,9 +74,24 @@ the BK3632 status reply, and USB is the fallback while no RF link is actually
 connected. Pressing a BT channel key re-enables RF. On the direct 2.4G band the
 `Fn`+`Q`/`W`/`E` BLE keys are disabled.
 
-The `Fn`+`Q`/`W`/`E` indicator shows the active channel: solid blue when
-connected, slow blink when the channel is selected but no link is up (paired or
-not), and fast blink only while a pairing sequence is running.
+The re-pairing sequence mirrors the stock. The stock pairing path (`0xAA14`)
+builds `rf_set_link_mode(link, 1)` (`AA 03 01 01 <mode>`) and transmits it once,
+fire-and-forget; the periodic link supervisor reads the status and re-asserts
+the link once it reports paired. The stock's bond wipe is `rf_cmd_03(3)`
+(`AA 03 03 03 00`), not param 2 - SMK wipes with the same value before pairing,
+because the old bond otherwise re-adopts the previous host. The `Fn`+`Q`/`W`/`E`
+hold threshold matches the stock pairing counter (150 ticks, ~1.5 s).
+
+The `Fn`+`Q`/`W`/`E` indicator shows the active channel: solid blue when the
+link is connected, slow blink when the channel is selected but no link is up
+(paired and searching, or unbound), and fast blink for the whole pairing
+exchange. The fast blink clears once the new bond is established (`paired`), or
+when the user switches channel or drops back to USB. In USB mode the RF link is
+disabled and the channel key stays dark.
+
+The two blink states (pairing, and a selected channel with no link) overlay the
+effect without Fn held, so a pairing or reconnect sequence stays visible until
+it succeeds. The steady connected state only overlays while Fn is held.
 
 ## USB
 
@@ -153,7 +168,7 @@ timeouts are counted in those ticks, so they are easy to mis-size:
 
 | Constant | Ticks | Real time | Meaning |
 | --- | --- | --- | --- |
-| `LINK_PAIRING_HOLD_TICKS` | 300 | ~3 s | `Fn`+`Q`/`W`/`E` long-press starts pairing |
+| `LINK_PAIRING_HOLD_TICKS` | 150 | ~1.5 s | `Fn`+`Q`/`W`/`E` long-press starts pairing (stock counter) |
 | `SLIDER_DEBOUNCE_ITERS` | 256 | ~2.6 s | band / on-off switch debounce |
 | `RF_SUPERVISOR_TICK_INTERVAL` | 500 | ~5 s | RF status poll interval |
 | `RF_PAIRING_WINDOW_POLLS` | 600 | ~50 min | pairing window before re-asserting the link |

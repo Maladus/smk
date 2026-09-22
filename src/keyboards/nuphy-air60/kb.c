@@ -319,7 +319,7 @@ void kb_update()
                 dprintf("rf link pairing %02x\r\n", mode);
                 keyboard_state.paired    = 0;
                 keyboard_state.connected = 0;
-                rf_set_link_pairing(mode, &keyboard_state);
+                rf_set_link_pairing(mode);
                 link_pairing_armed = false;
             }
         }
