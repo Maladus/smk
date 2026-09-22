@@ -9,7 +9,8 @@
 - Wireless: BK3632 (BT and 2.4G)
 - Switches: hot-swap, plus a power on/off switch and a BLE/2.4G switch
 - PCBs: three — a key-switch PCB, a small USB hub (1x USB-C in, USB-C + USB-A out), and the main keyboard PCB
-- USB: `0603:1020` (stock device descriptor at `0xF9A8`)
+- USB hub: `1a40:0801` (Terminus Technology 4-port USB 2.0 hub; the small hub PCB)
+- USB: `0603:1020` (stock device descriptor at `0xF9A8`); the keyboard enumerates behind the internal hub
 
 ## Pictures
 
