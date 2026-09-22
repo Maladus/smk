@@ -252,13 +252,9 @@ static uint8_t fn_channel_blue(void)
         // Link up: solid blue.
         return 255;
     }
-    if (keyboard_state.paired) {
-        // Paired but not connected: slow blink while it reconnects.
-        return (status_pulse_counter & FN_BLINK_SLOW) ? 255 : 0;
-    }
-    // Unpaired: the channel is advertising for a host, which blinks at the
-    // same fast cadence as pairing.
-    return (status_pulse_counter & FN_BLINK_FAST) ? 255 : 0;
+    // Selected but no link yet (paired or not): slow blink while it connects.
+    // Fast blink is reserved for an active pairing sequence.
+    return (status_pulse_counter & FN_BLINK_SLOW) ? 255 : 0;
 }
 
 static void led_regen_one(void)

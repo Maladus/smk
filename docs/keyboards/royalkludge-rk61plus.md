@@ -74,7 +74,8 @@ connected. Pressing a BT channel key re-enables RF. On the direct 2.4G band the
 `Fn`+`Q`/`W`/`E` BLE keys are disabled.
 
 The `Fn`+`Q`/`W`/`E` indicator shows the active channel: solid blue when
-connected, slow blink while connecting, and fast blink while pairing.
+connected, slow blink when the channel is selected but no link is up (paired or
+not), and fast blink only while a pairing sequence is running.
 
 ## USB
 

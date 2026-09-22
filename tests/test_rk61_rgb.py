@@ -241,6 +241,24 @@ class TestFnChannelIndicator(unittest.TestCase):
         finally:
             sim.close()
 
+    def test_slow_blink_when_unpaired(self):
+        """A selected channel with no link at all (not even paired) slow-blinks;
+        fast blink is reserved for an active pairing sequence."""
+        sim = RgbSim()
+        try:
+            for counter in (0x08, 0x18, 0x28):  # bit 3 set -> ON
+                sim.stage_fn(RF_BT1, connected=0, paired=0,
+                             pairing_active=0, counter=counter)
+                self.assertEqual(sim.fb_blue(FN_ROW, Q_COL), 255,
+                                 f"slow blink ON at counter 0x{counter:02x}")
+            for counter in (0x00, 0x07, 0x10):  # bit 3 clear -> OFF
+                sim.stage_fn(RF_BT1, connected=0, paired=0,
+                             pairing_active=0, counter=counter)
+                self.assertEqual(sim.fb_blue(FN_ROW, Q_COL), 0,
+                                 f"slow blink OFF at counter 0x{counter:02x}")
+        finally:
+            sim.close()
+
     def test_fast_blink_when_pairing(self):
         sim = RgbSim()
         try:
