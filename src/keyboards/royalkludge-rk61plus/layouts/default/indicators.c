@@ -267,18 +267,21 @@ static void led_regen_one(void)
     uint8_t g = 0;
     uint8_t b = 0;
 
-    if (action_layer != 0) {
-        // Fn held: dark the matrix and light only the active channel key.
-        if (regen_row == FN_ROW && regen_col == fn_active_col()) {
-            b = fn_channel_blue();
-        }
-    } else if (user_settings.led_effect < FX_OFF) {
+    if (user_settings.led_effect < FX_OFF) {
         uint8_t rgb[3];
         if (led_effect_rgb((led_effect_t)user_settings.led_effect, regen_row, regen_col, led_phase, user_settings.led_brightness, rgb)) {
             r = rgb[0];
             g = rgb[1];
             b = rgb[2];
         }
+    }
+
+    // Fn held: overlay the active BT channel key (Q/W/E) with its status, and
+    // leave the rest of the effect running underneath.
+    if (action_layer != 0 && regen_row == FN_ROW && regen_col == fn_active_col()) {
+        r = 0;
+        g = 0;
+        b = fn_channel_blue();
     }
 
     led_fb[regen_row][0][regen_col] = r;

@@ -262,6 +262,7 @@ class TestFnChannelIndicator(unittest.TestCase):
     def test_active_blue_reaches_the_q_pwm_sink(self):
         sim = RgbSim()
         try:
+            sim.set_settings(FX_OFF, brightness=255)  # isolate the overlay
             sim.stage_fn(RF_BT1, connected=1, paired=1, pairing_active=0, counter=0)
             sim.kb.set_xram(sim.kb._static("indicators", "led_col"), [Q_COL])
             sim.step()  # processes the Q column
@@ -270,6 +271,20 @@ class TestFnChannelIndicator(unittest.TestCase):
             self.assertEqual(d2[8], 255, "Q blue reaches the PWM12 sink")
             self.assertEqual(d2[:8] + d2[9:], [0] * 17,
                              "no other sink is lit for the Q column")
+        finally:
+            sim.close()
+
+    def test_effect_stays_on_non_channel_keys_while_fn_held(self):
+        """Holding Fn overlays the channel key; it must not darken the rest of
+        the matrix, the effect keeps running underneath."""
+        sim = RgbSim()
+        try:
+            sim.set_settings(FX_SOLID_RED, brightness=255)
+            sim.stage_fn(RF_BT1, connected=1, paired=1, pairing_active=0, counter=0)
+            self.assertEqual(sim.fb_rgb(0, 0), [255, 0, 0],
+                             "Esc keeps the effect while Fn is held")
+            self.assertEqual(sim.fb_rgb(FN_ROW, Q_COL), [0, 0, 255],
+                             "the active channel key is overlaid blue")
         finally:
             sim.close()
 
