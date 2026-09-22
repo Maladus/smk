@@ -130,12 +130,12 @@ class cl_sh68f90_sie : public cl_hw
         class cl_address_space *bas = uc->address_space("bits");
         if (bas) {
             // The firmware reads some pins bit-wise (P0: RC battery sense/discharge
-            // b0/b1; P5: rows R3/R4 b3/b4, CONN_MODE b5, OS switch b6; P7: rows
-            // R0-R2 b1-b3). Hook those bit cells so bit reads see the pin level too.
-            // (Bit addr of Px.i = Px + i; these are all inputs, so no bit-write
-            // linkage to maintain.)
-            int p0in[] = {0, 1}, p5in[] = {3, 4, 5, 6}, p7in[] = {1, 2, 3};
-            for (int k = 0; k < 2; k++)
+            // b0/b1 + BK3632 MISO b3; P5: rows R3/R4 b3/b4, CONN_MODE b5, OS switch
+            // b6; P7: rows R0-R2 b1-b3). Hook those bit cells so bit reads see the
+            // pin level too. (Bit addr of Px.i = Px + i; these are all inputs, so no
+            // bit-write linkage to maintain.)
+            int p0in[] = {0, 1, 3}, p5in[] = {3, 4, 5, 6}, p7in[] = {1, 2, 3};
+            for (int k = 0; k < 3; k++)
                 p0_bit[p0in[k]] = register_cell(bas, 0x80 + p0in[k]);
             for (int k = 0; k < 4; k++)
                 p5_bit[p5in[k]] = register_cell(bas, 0x88 + p5in[k]);
