@@ -143,6 +143,27 @@ the hardware mapping above was confirmed by flipping the switches and reading th
 pins. The radio stays up in wired/USB mode too, so `Fn`+`Q`/`W`/`E` can connect a
 BLE host while the cable is plugged in and toggle back to USB (stock behaviour).
 
+## Timing
+
+The main loop (and `kb_update()`) runs at roughly **100 Hz** (~10 ms per tick) on
+this board — measured by logging a tick counter (1000 ticks took ~10 s). Several
+timeouts are counted in those ticks, so they are easy to mis-size:
+
+| Constant | Ticks | Real time | Meaning |
+| --- | --- | --- | --- |
+| `LINK_PAIRING_HOLD_TICKS` | 300 | ~3 s | `Fn`+`Q`/`W`/`E` long-press starts pairing |
+| `SLIDER_DEBOUNCE_ITERS` | 256 | ~2.6 s | band / on-off switch debounce |
+| `RF_SUPERVISOR_TICK_INTERVAL` | 500 | ~5 s | RF status poll interval |
+| `RF_PAIRING_WINDOW_POLLS` | 600 | ~50 min | pairing window before re-asserting the link |
+
+The RF status is polled only every ~5 s, so connect/disconnect shows up with up
+to that latency, and the pairing window is effectively unbounded. The original
+`LINK_PAIRING_HOLD_TICKS = 60000` was ~10 min, which is why a long-press never
+armed pairing.
+
+The LED side is driven by Timer2 instead of the main loop: ~100 us per matrix
+scan and ~400 us per LED subframe (14 subframes per frame → ~5.6 ms/frame).
+
 ## Backlight
 
 The backlight is a per-key RGB matrix driven by the SH68F90's PWM units. It is
