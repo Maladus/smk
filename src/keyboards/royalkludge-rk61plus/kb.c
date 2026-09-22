@@ -42,7 +42,8 @@ bool kb_pairing_active(void)
 
 #ifdef RF_ENABLED
 // Hold time (in main-loop kb_update() ticks) before Fn+Q/W/E starts pairing.
-#    define LINK_PAIRING_HOLD_TICKS 60000
+// kb_update() runs at ~100 Hz on this board, so 300 ticks is ~3 s.
+#    define LINK_PAIRING_HOLD_TICKS 300
 // Main-loop iterations a changed band-switch level must hold before it is
 // accepted.
 #    define SLIDER_DEBOUNCE_ITERS 256

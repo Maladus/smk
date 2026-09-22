@@ -125,7 +125,7 @@ class TestPairing(RfTestCase):
         self.kb.call_key(LNK_BT1, True, self.slave)  # press arms the hold timer
         self.slave.frames.clear()
         # Jump the hold counter to the threshold so one kb_update() pairs.
-        self.kb.set_xram(self.kb._static("kb", "link_hold_ticks"), [0x60, 0xEA])  # 60000
+        self.kb.set_xram(self.kb._static("kb", "link_hold_ticks"), [0x2C, 0x01])  # 300
         self.kb.cold_call(self.kb._a("kb_update"), slave=self.slave)
 
         pairing = [f for f in self.link_frames() if f[3] == 1]
