@@ -208,6 +208,7 @@ class Sim:
         self.lines = load_lines(cdb) if cdb.exists() else {}
         self.LED_STATE = s["keyboard_state"]      # struct, led_state is field 0
         self.USB_DEVICE_STATE = s["usb_device_state"]
+        self.RECEIVED_USB_ADDR = s["received_usb_addr"]
         self.USB_TASK = s["usb_task"]
         # POST_INIT can't be a single symbol -- it's the address after the LCALL
         # _init inside main(). find_post_init() walks main()'s prologue to find it.
@@ -321,7 +322,7 @@ class Sim:
         return self.run(cmds)
 
     def set_address(self, addr):
-        """Boot, SET_ADDRESS, then read USBADDR (committed during the status stage)."""
+        """Boot, SET_ADDRESS, then read USBADDR (committed in the handler)."""
         cmds = self._boot_to_post_init() + self._ctrl(set_address(addr)) + [
             f"dump sfr 0x{self.USBADDR:x} 0x{self.USBADDR:x}",
         ]
@@ -373,6 +374,7 @@ class Sim:
         cmds += [
             f"dump xram 0x{self.USB_DEVICE_STATE:x} 0x{self.USB_DEVICE_STATE:x}",
             f"dump sfr 0x{self.USBADDR:x} 0x{self.USBADDR:x}",
+            f"dump xram 0x{self.RECEIVED_USB_ADDR:x} 0x{self.RECEIVED_USB_ADDR:x}",
         ]
         return self.run(cmds)
 

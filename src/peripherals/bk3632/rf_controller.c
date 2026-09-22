@@ -67,13 +67,8 @@ void rf_init()
 {
     uint8_t status_bytes[2];
 
-    delay_ms(255);
-    delay_ms(255);
-    delay_ms(255);
-    delay_ms(255);
-    delay_ms(255);
-    delay_ms(255);
-
+    // No blind fixed wait: the host's USB enumeration must not sit behind the
+    // radio coming up. Wake the part and poll until it reports ready.
     for (uint8_t tries = 10; tries > 0; tries--) {
         rf_wake_nudge();
         delay_ms(tries);
@@ -196,13 +191,16 @@ bool rf_update_keyboard_state(keyboard_state_t *keyboard)
     return true;
 }
 
-#define RF_SUPERVISOR_TICK_INTERVAL 2000u
+// Poll often enough that connect/disconnect is reflected promptly, and seed the
+// counter so the very first kb_update() reads the status instead of waiting a
+// full interval - the boot-time USB fallback must not depend on a delayed poll.
+#define RF_SUPERVISOR_TICK_INTERVAL 500u
 #define RF_PAIRING_WINDOW_POLLS     600u
 
 static uint8_t  commanded_link       = RF_MODE_2_4G;
 static uint16_t pairing_window_polls = 0;
 
-static uint16_t supervisor_ticks      = 0;
+static uint16_t supervisor_ticks      = RF_SUPERVISOR_TICK_INTERVAL;
 static uint8_t  supervisor_was_paired = 0;
 
 void rf_link_supervisor(keyboard_state_t *keyboard)

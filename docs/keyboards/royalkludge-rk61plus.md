@@ -64,16 +64,33 @@ pins:
 | WAKE | P0.2 |
 | ACK | P4.1 |
 
-The BLE/2.4G switch selects the band; within BLE, the BT channel is chosen with
-`Fn`+`Q`/`W`/`E` (`LNK_BT1`/`LNK_BT2`/`LNK_BT3`). A short press switches to that
-channel, a long press starts pairing for it, and a short press on the active,
-connected channel disables BLE and falls back to USB when a host is attached.
-BLE takes priority while a BT channel is connected; USB is the fallback when no
-BLE channel is active, and pressing a BT channel key re-enables it. On the direct
-2.4G band the `Fn`+`Q`/`W`/`E` BLE keys are disabled.
+The band input (P5.5) selects 2.4G vs BLE; within BLE, the BT channel is chosen
+with `Fn`+`Q`/`W`/`E` (`LNK_BT1`/`LNK_BT2`/`LNK_BT3`). A short press switches to
+that channel, a long press starts pairing for it, and a short press on the
+active, connected channel disables BLE and falls back to USB when a host is
+attached. Reports follow the real RF link status: `connected`/`paired` come from
+the BK3632 status reply, and USB is the fallback while no RF link is actually
+connected. Pressing a BT channel key re-enables RF. On the direct 2.4G band the
+`Fn`+`Q`/`W`/`E` BLE keys are disabled.
 
 The `Fn`+`Q`/`W`/`E` indicator shows the active channel: solid blue when
 connected, slow blink while connecting, and fast blink while pairing.
+
+## USB
+
+The USB stack is stock-aligned where it matters for enumeration. The stock
+commits the device address in the EP0 IN (status-stage) handler, not in the
+setup handler: `Function_118` at `0xA8FE` is reached from the `IEP0IF`
+interrupt and does `MOV USBADDR,A` at `0xA941`. It also does not stall EP0 OUT
+for SET_ADDRESS (the only `OEP0STL` writes are error paths). SMK matches this:
+`usb_set_address_handler()` records `received_usb_addr` and arms the status
+stage, and `usb_ep0_in_irq()` commits `USBADDR` there. The one divergence was a
+spurious `SET_EP0_OUT_STALL` in the setup handler, which could leave EP0 OUT
+stalled into the next SETUP and intermittently drop SET_CONFIGURATION (`can't
+set config #1, error -32`); it has been removed.
+
+`usb_hw_init()` matches the stock USB init (`0xB144`): `USBADDR=0`, `USBIE1=0x5F`,
+`USBIE2=0x11`, `USBCON=0xC0`.
 
 ## Battery monitoring
 
@@ -111,15 +128,19 @@ firmware never gates them individually.
 
 ## Switches
 
-Two board switches are read as active-low inputs (pull-ups enabled):
+The mode is read as active-low inputs (pull-ups enabled), traced from the stock
+switch-poll routine (`0x7C00`):
 
-| Switch | Pin | Stock read |
-| --- | --- | --- |
-| BLE/2.4G | P5.5 | `JNB P5.5` at `0x7C50` — high = 2.4G, low = BLE |
-| on/off | P5.6 | `JNB P5.6` at `0x7C2A` / `0x7C3D` (debounced) |
+| Input | Pin | Stock read | Meaning |
+| --- | --- | --- | --- |
+| band | P5.5 | `JNB P5.5` at `0x7C50` | high = 2.4G, low = BLE |
+| wired | P5.6 | `JNB P5.6` at `0x7C2A` / `0x7C3D` (debounced) | low = wired/USB, high = wireless |
 
-Traced from the stock firmware's switch-poll routine (`0x7C00`). The on/off
-switch is on P5.6; its assignment still needs hardware confirmation.
+The two inputs select the mode exactly as the stock does: P5.5 high → 2.4G;
+P5.5 low + P5.6 high → BLE; P5.5 low + P5.6 low → USB. The stock never reads an
+on/off switch, so it only gates battery power. The physical source of P5.6 (a
+mode switch or a USB-present detect) is not bench-confirmed; the firmware logic
+is independent of it.
 
 ## Backlight
 

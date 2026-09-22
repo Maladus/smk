@@ -20,9 +20,11 @@ extern void indicators_brightness_down(void);
 extern void indicators_speed_up(void);
 extern void indicators_speed_down(void);
 
-// Where keyboard reports go. RF (BLE or 2.4G) is the primary link; a short press
-// on the active, connected BT channel toggles to USB, and USB is the fallback
-// while no BLE channel is active.
+// Where keyboard reports go. The board switches select the mode, matching the
+// stock logic (0x7C00): P5.5 picks the band (2.4G vs BLE) and P5.6 low picks
+// wired/USB. Within RF, a short press on the active, connected BT channel
+// toggles to USB, and USB is the fallback while no RF link is actually
+// connected (keyboard_state.connected comes from the RF status reply).
 typedef enum {
     KEYBOARD_CONN_MODE_RF  = 0,
     KEYBOARD_CONN_MODE_USB = 1,
@@ -70,6 +72,12 @@ static bool kb_band_24g(void)
     return BAND_SWITCH != 0;
 }
 
+// P5.6 low = wired/USB (stock 0x0927==0 -> mode 1). High = wireless.
+static bool kb_wired(void)
+{
+    return WIRED_SWITCH == 0;
+}
+
 // Switch the RF link and mirror it into the keyboard_state the channel
 // indicator reads. `persist` records a user-chosen BT channel in settings; the
 // band switch must not overwrite the remembered channel with the 2.4G slot.
@@ -80,19 +88,31 @@ static void kb_set_link(rf_mode_t link, bool persist)
         user_settings.rf_link = (uint8_t)link;
         settings_mark_dirty();
     }
-    keyboard_state.rf_link   = (uint8_t)link;
-    keyboard_state.connected = 1;
-    keyboard_state.paired    = 1;
+    // Mirror the requested channel only; connected/paired are set by the RF
+    // supervisor from the status reply, so a selected-but-unbound channel does
+    // not steal reports from USB.
+    keyboard_state.rf_link = (uint8_t)link;
 }
 
-// Apply the band switch: 2.4G pins the link, BLE restores the last BT channel.
+// Apply the switch state, matching the stock's mode selection (0x7C00):
+//   P5.5 high            -> 2.4G
+//   P5.5 low, P5.6 high  -> BLE (last BT channel)
+//   P5.5 low, P5.6 low   -> wired/USB
 static void kb_apply_band(void)
 {
     if (kb_band_24g()) {
+        conn_mode = KEYBOARD_CONN_MODE_RF;
         kb_set_link(RF_MODE_2_4G, false);
         return;
     }
 
+    if (kb_wired()) {
+        conn_mode = KEYBOARD_CONN_MODE_USB;
+        rf_apply_usb_mode();
+        return;
+    }
+
+    conn_mode    = KEYBOARD_CONN_MODE_RF;
     uint8_t link = user_settings.rf_link;
     if (link == RF_MODE_2_4G || link > RF_MODE_BT3) {
         link = RF_MODE_BT1;
@@ -201,25 +221,47 @@ void kb_update_switches()
 {
 #ifdef RF_ENABLED
     static uint16_t band_debounce;
+    static uint16_t wired_debounce;
     static int8_t   band_24g_last = -1;
+    static int8_t   wired_last    = -1;
 
-    const uint8_t raw_24g = kb_band_24g();
-    if (band_24g_last < 0) {
-        // First read: apply the switch level without waiting out the debounce.
-        band_24g_last = (int8_t)raw_24g;
+    const uint8_t raw_24g   = kb_band_24g();
+    const uint8_t raw_wired = kb_wired();
+
+    if (band_24g_last < 0 || wired_last < 0) {
+        // First read: apply the switch levels without waiting out the debounce,
+        // so the mode is correct on the first main-loop pass.
+        band_24g_last  = (int8_t)raw_24g;
+        wired_last     = (int8_t)raw_wired;
+        pairing_active = false;
         kb_apply_band();
         return;
     }
 
+    bool changed = false;
+
     if (raw_24g == (uint8_t)band_24g_last) {
         band_debounce = 0;
     } else if (++band_debounce >= SLIDER_DEBOUNCE_ITERS) {
-        band_debounce  = 0;
-        band_24g_last  = (int8_t)raw_24g;
-        conn_mode      = KEYBOARD_CONN_MODE_RF;
-        pairing_active = false;
-        kb_apply_band();
+        band_debounce = 0;
+        band_24g_last = (int8_t)raw_24g;
+        changed       = true;
     }
+
+    if (raw_wired == (uint8_t)wired_last) {
+        wired_debounce = 0;
+    } else if (++wired_debounce >= SLIDER_DEBOUNCE_ITERS) {
+        wired_debounce = 0;
+        wired_last     = (int8_t)raw_wired;
+        changed        = true;
+    }
+
+    if (!changed) {
+        return;
+    }
+
+    pairing_active = false;
+    kb_apply_band();
 #endif
 }
 

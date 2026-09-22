@@ -47,6 +47,12 @@ class Rk61RfSim(Rk61Sim):
         low = BLE (pull-up idles high, so BLE is the driven-low state)."""
         self.set_pin(P5, 0xFF if on else 0xDF)
 
+    def set_wired(self, on):
+        """Stage the P5.6 wired/USB input: low = wired (stock mode 1), high =
+        wireless. Read-modify-write so it composes with set_band_24g()."""
+        cur = self.get_xram(self.PIN_STAGE[P5], 1)[0]
+        self.set_pin(P5, (cur & ~0x40) if on else (cur | 0x40))
+
     def cold_call(self, addr, slave=None, dpl=None, dph=None, b=None, stack_arg=None):
         """Cold-invoke `addr` and return once it RETs onto the 0x9000 sled,
         servicing `slave`'s SPI breakpoints in between. The SDCC stack-auto frame

@@ -50,6 +50,7 @@ RF_CMD_USB_MODE = 0x06
 
 RF_MODE_BT1 = 0x01
 RF_MODE_BT2 = 0x02
+RF_MODE_2_4G = 0x00
 
 
 def rf_checksum(data):
@@ -78,6 +79,13 @@ class RfTestCase(unittest.TestCase):
 
     def state_byte(self, offset):
         return self.kb.get_xram(self.kb._a("keyboard_state") + offset, 1)[0]
+
+    def set_connected(self, connected, paired=0):
+        """Stage keyboard_state.connected/paired, which now come only from the
+        RF status reply (no boot-time fake)."""
+        ks = self.kb._a("keyboard_state")
+        self.kb.set_xram(ks + 4, [connected])
+        self.kb.set_xram(ks + 5, [paired])
 
 
 class TestLinkSelection(RfTestCase):
@@ -130,9 +138,13 @@ class TestPairing(RfTestCase):
 class TestUsbFallback(RfTestCase):
     def _toggle_to_usb(self):
         self.kb.mark_usb_configured()
-        # Select BT1 (sets rf_link + connected optimistically), release.
+        # A live, connected BT1 link (rf_link=1, connected, paired).
+        self.slave.set_status(0x87, 0x38)
+        # Select BT1, then let the supervisor read the status so the channel is
+        # actually connected (connected is no longer set optimistically).
         self.kb.call_key(LNK_BT1, True, self.slave)
         self.kb.call_key(LNK_BT1, False, self.slave)
+        self.kb.cold_call(self.kb._a("kb_update"), slave=self.slave)
         self.slave.frames.clear()
         # Short-press the active, connected channel again: BLE off, USB on.
         self.kb.call_key(LNK_BT1, True, self.slave)
@@ -163,6 +175,7 @@ class TestReport(RfTestCase):
     def test_report_frame_carries_keys(self):
         # report_keyboard_t: mods, reserved, keys[6]. rf_send_report() drops the
         # reserved byte and sends mods + keys[0..4].
+        self.set_connected(1)
         self.kb.set_xram(self.kb._a("keyboard_report"),
                          [0x00, 0x00, 0x04, 0x05, 0x06, 0x00, 0x00, 0x00])
         self.kb.cold_call(self.kb._a("send_keyboard_report"), slave=self.slave)
@@ -187,6 +200,59 @@ class TestStatusReply(RfTestCase):
         self.assertEqual(self.kb.get_sfr(0x82), 1, "rf_get_status must return true")
         self.assertEqual(self.kb.get_xram(buf, 2), [0x87, 0x18],
                          "the two status bytes must reach the caller's buffer")
+
+
+class TestBootFallback(RfTestCase):
+    """connected/paired come only from the RF status reply: a cold boot with no
+    live link must fall back to USB immediately instead of waiting out a poll."""
+
+    def test_boot_does_not_fake_connected(self):
+        self.assertEqual(self.state_byte(4), 0, "connected must not be faked at boot")
+        self.assertEqual(self.state_byte(5), 0, "paired must not be faked at boot")
+
+    def test_boot_report_uses_usb_without_rf_link(self):
+        self.kb.mark_usb_configured()
+        self.slave.frames.clear()
+        self.kb.set_xram(self.kb._a("keyboard_report"),
+                         [0x00, 0x00, 0x07, 0x00, 0x00, 0x00, 0x00, 0x00])
+        self.kb.cold_call(self.kb._a("send_keyboard_report"), slave=self.slave)
+        self.assertEqual(self.report_frames(), [],
+                         "with no RF link the report must fall back to USB")
+
+    def test_connected_link_routes_over_rf(self):
+        self.slave.set_status(0x87, 0x38)  # ready + battery, BT1 connected+paired
+        self.kb.cold_call(self.kb._a("kb_update"), slave=self.slave)
+        self.assertEqual(self.state_byte(4), 1, "a live link must set connected")
+        self.slave.frames.clear()
+        self.kb.set_xram(self.kb._a("keyboard_report"),
+                         [0x00, 0x00, 0x07, 0x00, 0x00, 0x00, 0x00, 0x00])
+        self.kb.cold_call(self.kb._a("send_keyboard_report"), slave=self.slave)
+        self.assertTrue(self.report_frames(), "a live link must route over RF")
+
+
+class TestModeSwitch(RfTestCase):
+    """The stock mode inputs (0x7C00): P5.5 = band, P5.6 low = wired/USB."""
+
+    def _conn_mode(self):
+        return self.kb.get_xram(self.kb._static("kb", "conn_mode"), 1)[0]
+
+    def test_wired_input_selects_usb(self):
+        self.kb.set_wired(True)
+        self.kb.cold_call(self.kb._a("kb_update_switches"), slave=self.slave)
+        self.assertEqual(self._conn_mode(), 1, "P5.6 low must select USB")
+
+    def test_wireless_input_selects_rf(self):
+        self.kb.set_wired(False)
+        self.kb.cold_call(self.kb._a("kb_update_switches"), slave=self.slave)
+        self.assertEqual(self._conn_mode(), 0, "P5.6 high must select RF")
+
+    def test_2_4g_band_pins_the_24g_link(self):
+        self.kb.set_band_24g(True)
+        self.kb.set_wired(False)
+        self.kb.cold_call(self.kb._a("kb_update_switches"), slave=self.slave)
+        self.assertEqual(self._conn_mode(), 0, "2.4G band must select RF")
+        self.assertEqual(self.state_byte(1), RF_MODE_2_4G,
+                         "2.4G band must pin the 2.4G link")
 
 
 if __name__ == "__main__":

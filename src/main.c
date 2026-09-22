@@ -58,9 +58,10 @@ static void restore_rf_link(void)
 {
     rf_set_link((rf_mode_t)user_settings.rf_link);
 
-    keyboard_state.rf_link   = user_settings.rf_link;
-    keyboard_state.connected = 1;
-    keyboard_state.paired    = 1;
+    // Mirror the remembered channel only. connected/paired come from the RF
+    // status reply: claiming a link here routes reports to RF before a host is
+    // known to be bound, which stalls the USB fallback for seconds after boot.
+    keyboard_state.rf_link = user_settings.rf_link;
 }
 #endif
 
@@ -74,10 +75,6 @@ void main(void)
 
     kb_init();
 
-#ifdef RF_ENABLED
-    rf_init();
-#endif
-
     restore_settings();
 #if DEBUG == 1
     settings_dump();
@@ -86,14 +83,26 @@ void main(void)
     usb_wait_for_enumeration();
     indicators_start();
 
-#ifdef RF_ENABLED
-    restore_rf_link();
-#endif
-
     sleep_init(); // needs the board's GPIO and RF up
+
+#ifdef RF_ENABLED
+    // Bring the radio up from the main loop, like the stock firmware: USB is
+    // already connected and serviced, so the host's enumeration never waits on
+    // the RF init. The transport falls back to USB until a link is real, so
+    // nothing is lost by deferring this.
+    bool rf_up = false;
+#endif
 
     while (1) {
         watchdog_kick();
+
+#ifdef RF_ENABLED
+        if (!rf_up) {
+            rf_up = true;
+            rf_init();
+            restore_rf_link();
+        }
+#endif
 
         kb_update_switches();
         kb_update();
