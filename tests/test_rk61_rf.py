@@ -47,6 +47,7 @@ RF_MAGIC = 0xAA
 RF_CMD_LINK = 0x01
 RF_CMD_REPORT = 0x02
 RF_CMD_USB_MODE = 0x06
+RF_CMD_BONDS = 0x03
 
 RF_MODE_BT1 = 0x01
 RF_MODE_BT2 = 0x02
@@ -132,8 +133,23 @@ class TestPairing(RfTestCase):
         self.assertTrue(pairing, "a long press must request pairing")
         self.assertEqual(pairing[0][4], RF_MODE_BT1)
 
+        wipe = [f for f in self.slave.frames if f[2] == RF_CMD_BONDS]
+        self.assertTrue(wipe, "a long press must clear the old bond before pairing")
+        self.assertEqual(wipe[0][3], 2, "rf_cmd_03(2) wipes the stored bonds")
+
         self.assertEqual(self.state_byte(4), 0, "connected comes from the status reply")
         self.assertEqual(self.state_byte(5), 1, "paired comes from the status reply")
+
+    def test_pairing_blink_persists_while_link_connected(self):
+        """The indicator fast-blinks for a window after the pairing command even
+        when the link is already connected - clearing on connected hid it."""
+        self.slave.set_status(0x87, 0x38)  # connected BT1
+        self.kb.call_key(LNK_BT1, True, self.slave)
+        self.kb.set_xram(self.kb._static("kb", "link_hold_ticks"), [0x2C, 0x01])  # 300
+        self.kb.cold_call(self.kb._a("kb_update"), slave=self.slave)
+
+        self.assertEqual(self.kb.get_xram(self.kb._static("kb", "pairing_active"), 1)[0], 1,
+                         "pairing_active must stay set right after the pairing command")
 
 
 class TestUsbFallback(RfTestCase):

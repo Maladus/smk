@@ -44,11 +44,15 @@ bool kb_pairing_active(void)
 // Hold time (in main-loop kb_update() ticks) before Fn+Q/W/E starts pairing.
 // kb_update() runs at ~100 Hz on this board, so 300 ticks is ~3 s.
 #    define LINK_PAIRING_HOLD_TICKS 300
+// How long the channel indicator fast-blinks after a pairing command. The link
+// is usually already connected, so this cannot key off connected/paired.
+#    define PAIRING_BLINK_TICKS 300
 // Main-loop iterations a changed band-switch level must hold before it is
 // accepted.
 #    define SLIDER_DEBOUNCE_ITERS 256
 
 static uint16_t link_hold_ticks;
+static uint16_t pairing_blink_ticks;
 static uint16_t link_hold_keycode;
 static bool     link_pairing_armed;
 static bool     link_press_was_active;
@@ -324,6 +328,10 @@ void kb_update()
             keyboard_state.paired    = 0;
             keyboard_state.connected = 0;
             pairing_active           = true;
+            pairing_blink_ticks      = PAIRING_BLINK_TICKS;
+            // Wipe the old bond first, or the radio re-adopts it instead of
+            // pairing the new host.
+            rf_wipe_bonds();
             rf_set_link_pairing(link, &keyboard_state);
             link_pairing_armed = false;
         }
@@ -331,9 +339,13 @@ void kb_update()
 
     // The indicator fast-blinks while pairing; stop once the link comes up or a
     // bond is established (then it shows solid/slow-blink instead).
-    if (pairing_active && (keyboard_state.connected || keyboard_state.paired)) {
-        pairing_active = false;
+    // Fast-blink for a fixed window after a pairing command, then fall back to
+    // the connected/paired state. (The link is usually already connected when a
+    // re-pair is requested, so clearing on connected made the blink invisible.)
+    if (pairing_blink_ticks != 0) {
+        pairing_blink_ticks--;
     }
+    pairing_active = (pairing_blink_ticks != 0);
 
     if (conn_mode == KEYBOARD_CONN_MODE_RF) {
         rf_link_supervisor(&keyboard_state);

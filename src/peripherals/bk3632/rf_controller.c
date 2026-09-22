@@ -108,6 +108,15 @@ void rf_factory_reset_bonds(void)
     delay_ms(200);
 }
 
+// Clear the stored BT bonds so the next pairing adopts a new host instead of
+// re-adopting the old bond. Lighter than rf_factory_reset_bonds(): no
+// sleep/re-init cycle, so it is cheap enough for a long-press pairing.
+void rf_wipe_bonds(void)
+{
+    rf_cmd_03(2); // wipe stored bonds
+    delay_ms(100);
+}
+
 uint8_t kro6buffer[6];
 
 static uint8_t rf_pending_buf[6];

@@ -66,7 +66,8 @@ pins:
 
 The band input (P5.5) selects 2.4G vs BLE; within BLE, the BT channel is chosen
 with `Fn`+`Q`/`W`/`E` (`LNK_BT1`/`LNK_BT2`/`LNK_BT3`). A short press switches to
-that channel, a long press starts pairing for it, and a short press on the
+that channel, a long press clears the stored bonds and starts pairing for it,
+and a short press on the
 active, connected channel disables BLE and falls back to USB when a host is
 attached. Reports follow the real RF link status: `connected`/`paired` come from
 the BK3632 status reply, and USB is the fallback while no RF link is actually
