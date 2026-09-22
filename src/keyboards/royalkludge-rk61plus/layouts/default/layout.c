@@ -41,7 +41,7 @@ const uint16_t keymaps[][MATRIX_ROWS][MATRIX_COLS] = {
      * |------------------------------------------------------------|
      * |Shift   |  Z|  X|  C|  V|  B|  N|  M|  ,|  .|  /|      Shift|
      * |------------------------------------------------------------|
-     * |Fn |Gui |Alt |          Space          |Alt |Gui |App |Ctl |
+     * |Ctl|Gui |Alt |          Space          |Alt |Menu|Ctl |Fn  |
      * `------------------------------------------------------------'
      */
     [_BL] = LAYOUT_60(
@@ -49,7 +49,7 @@ const uint16_t keymaps[][MATRIX_ROWS][MATRIX_COLS] = {
         KC_TAB,  KC_Q,    KC_W,    KC_E,    KC_R,    KC_T,    KC_Y,    KC_U,    KC_I,    KC_O,    KC_P,    KC_LBRC, KC_RBRC, KC_BSLS,
         KC_CAPS, KC_A,    KC_S,    KC_D,    KC_F,    KC_G,    KC_H,    KC_J,    KC_K,    KC_L,    KC_SCLN, KC_QUOT,          KC_ENT,
         KC_LSFT, KC_Z,    KC_X,    KC_C,    KC_V,    KC_B,    KC_N,    KC_M,    KC_COMM, KC_DOT,  KC_SLSH,          KC_RSFT,
-        FN,      KC_LGUI, KC_LALT,                            KC_SPC,                    KC_RALT, KC_RGUI, KC_APP,  KC_RCTL
+        KC_LCTL, KC_LGUI, KC_LALT,                            KC_SPC,                    KC_RALT, KC_APP,  KC_RCTL, FN
     ),
 
     /* Keymap _FL: (Function Layer)
@@ -75,7 +75,7 @@ const uint16_t keymaps[][MATRIX_ROWS][MATRIX_COLS] = {
         _______, LNK_BT1, LNK_BT2, LNK_BT3, _______, _______, KC_PSCR, KC_SCRL, KC_PAUS, _______, _______, BRI_DN,  BRI_UP,  FX_NEXT,
         _______, _______, _______, _______, _______, _______, KC_INS,  KC_HOME, KC_PGUP, _______, SPD_DN,  SPD_UP,           _______,
         _______, _______, _______, _______, _______, _______, KC_DEL,  KC_END,  KC_PGDN, _______, KC_UP,            _______,
-        _______, _______, _______,                            _______,                   KC_LEFT, _______, KC_DOWN, KC_RGHT
+        _______, _______, _______,                            _______,                   KC_LEFT, KC_DOWN, KC_RGHT, _______
     ),
 };
 
