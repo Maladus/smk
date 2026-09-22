@@ -105,6 +105,7 @@
 #define RF_BB_SPI_CS   P4_4
 #define RF_BB_WAKE     P0_2
 #define RF_BB_ACK      P4_1
+#define RF_BB_SPI_ACK  RF_BB_ACK
 
 #define RF_BB_SPI_SCK_P4_7  _P4_7
 #define RF_BB_SPI_MOSI_P0_4 _P0_4
@@ -112,6 +113,19 @@
 #define RF_BB_SPI_CS_P4_4   _P4_4
 #define RF_BB_WAKE_P0_2     _P0_2
 #define RF_BB_ACK_P4_1      _P4_1
+
+// Port/mask descriptors consumed by the shared bb_spi.c bit-bang driver. The
+// radio's WAKE line plays the role of the nuphy-air60 SPI MOT (drive low to
+// wake the part before a transfer).
+#define RF_BB_SPI_CS_PORT   4
+#define RF_BB_SPI_CS_MASK   RF_BB_SPI_CS_P4_4
+#define RF_BB_SPI_SCK_PORT  4
+#define RF_BB_SPI_SCK_MASK  RF_BB_SPI_SCK_P4_7
+#define RF_BB_SPI_MOSI_PORT 0
+#define RF_BB_SPI_MOSI_MASK RF_BB_SPI_MOSI_P0_4
+#define RF_BB_SPI_MOT       RF_BB_WAKE
+#define RF_BB_SPI_MOT_PORT  0
+#define RF_BB_SPI_MOT_MASK  RF_BB_WAKE_P0_2
 
 // LED row/colour sink PWM channels. The RGB matrix is the transpose of the
 // nuphy-air60: the PWM channels are the row/colour sinks and the key-matrix
@@ -135,7 +149,11 @@
 #define LED_SINK_R4R PWM01
 #define LED_SINK_R4B PWM02
 
-// Custom keycodes. The RF link keys arrive with the RF phase.
+// Custom keycodes. Fn layer Q/W/E select the BT channel (LNK_BT1/2/3).
 enum custom_keycodes {
-    KB_SAFE_RANGE = SAFE_RANGE,
+    LNK_BT1 = SAFE_RANGE,
+    LNK_BT2,
+    LNK_BT3,
+
+    KB_SAFE_RANGE,
 };

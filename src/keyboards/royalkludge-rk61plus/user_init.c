@@ -72,6 +72,12 @@ void user_gpio_init()
     GPIO_PULLUP_WRITE(6, 0xFF);
     GPIO_PULLUP_WRITE(7, 0xDF);
 
+    // bb_spi.c drives the BK3632 open-drain (each line is released high between
+    // bits), so the SPI/WAKE/ACK lines need pull-ups the stock boot values leave
+    // off. Enabling them is safe if the board also fits external ones.
+    GPIO_PULLUP_ON(0, (uint8_t)(RF_BB_WAKE_P0_2 | RF_BB_SPI_MISO_P0_3 | RF_BB_SPI_MOSI_P0_4));
+    GPIO_PULLUP_ON(4, (uint8_t)(RF_BB_ACK_P4_1 | RF_BB_SPI_CS_P4_4 | RF_BB_SPI_SCK_P4_7));
+
     // 25 mA drive for the ports that expose a drive-strength register, matching
     // the stock boot routine (0xA5C9).
     DRVCON = DRVCON_UNLOCK_P1;
