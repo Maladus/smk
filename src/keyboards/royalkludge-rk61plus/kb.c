@@ -230,32 +230,9 @@ bool kb_process_record(uint16_t keycode, bool key_pressed)
     return true;
 }
 
-// Temporary bring-up aid: log the candidate switch/status input pins whenever
-// they change, so the physical switch positions can be mapped to pin levels.
-static void kb_debug_switch_pins(void)
-{
-    static uint8_t last_p0, last_p4, last_p5, last_p7;
-    static bool    first = true;
-
-    const uint8_t p0 = P0 & 0xC0; // P0.6/P0.7 status inputs
-    const uint8_t p4 = P4 & 0x02; // P4.1 ACK
-    const uint8_t p5 = P5 & 0x60; // P5.5 on/off, P5.6 B/G band
-    const uint8_t p7 = P7 & 0xE0; // P7.5-P7.7 status/control
-
-    if (first || p0 != last_p0 || p4 != last_p4 || p5 != last_p5 || p7 != last_p7) {
-        dprintf("sw p0=%02x p4=%02x p5=%02x p7=%02x b24=%u w=%u\r\n", (unsigned)P0, (unsigned)P4, (unsigned)P5, (unsigned)P7, (unsigned)kb_band_24g(), (unsigned)kb_wired());
-        last_p0 = p0;
-        last_p4 = p4;
-        last_p5 = p5;
-        last_p7 = p7;
-        first   = false;
-    }
-}
-
 void kb_update_switches()
 {
 #ifdef RF_ENABLED
-    kb_debug_switch_pins();
     static uint16_t band_debounce;
     static uint16_t wired_debounce;
     static int8_t   band_24g_last = -1;
