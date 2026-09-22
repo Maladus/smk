@@ -149,3 +149,17 @@ hex="${1:-build/royalkludge-rk61plus_full.hex}"
 shift || true
 sinodude write --flash "$hex" -c sinodude-serial -p "${SINODUDE_PART:-sh68f90a}" --port "${SINODUDE_PORT:-/dev/ttyUSB0}" "$@"
 '''
+
+# Reflash over the stock USB ISP bootloader (sinowisp), no Arduino needed. Only
+# works while the bootloader at 0xF000 is intact; use flash-isp-full to restore
+# it if a plain sinodude write zeroed it.
+[tasks.flash-usb]
+description = "Write the RK61 Plus firmware over the USB ISP bootloader (sinowisp)"
+depends = ["setup"]
+run = '''
+#!/usr/bin/env bash
+set -euo pipefail
+meson compile -C build royalkludge-rk61plus_default_smk.hex > /dev/null
+sinowisp write --platform sh68f90 --vendor_id 0x258a --product_id 0x00f8 --force \
+  build/royalkludge-rk61plus_default_smk.hex
+'''
