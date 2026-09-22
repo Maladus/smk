@@ -2,9 +2,9 @@
 """RK61 Plus BK3632 RF link/pairing tests, driven through the patched uCsim
 simulator with a test-side SPI slave.
 
-The firmware bit-bangs SPI to a BK3632; `devices.RfSlave` emulates the chip
-test-side, shifting canned status bytes back on MISO and capturing the outgoing
-report/link/pairing frames. Assertions are on those frames and on the
+The firmware bit-bangs SPI to a BK3632; `rk61_rf_support.RfSlave` emulates the
+chip test-side, shifting canned status bytes back on MISO and capturing the
+outgoing report/link/pairing frames. Assertions are on those frames and on the
 keyboard_state / conn_mode the RF path drives.
 
 Run from the repo root, after building the RK61 firmware:
@@ -18,7 +18,7 @@ import unittest
 from pathlib import Path
 
 from sim import Sim, REPO_ROOT
-from devices import Rk61Sim, RfSlave
+from rk61_rf_support import Rk61RfSim as Rk61Sim, RfSlave
 
 
 def _rk61_firmware():
