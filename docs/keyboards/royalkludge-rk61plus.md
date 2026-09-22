@@ -9,7 +9,7 @@
 - Wireless: BK3632 (BT and 2.4G)
 - Switches: hot-swap, plus a power on/off switch and a BLE/2.4G switch
 - PCBs: three — a key-switch PCB, a small USB hub (1x USB-C in, USB-C + USB-A out), and the main keyboard PCB
-- USB: `258a:00c7`
+- USB: `0603:1020` (stock device descriptor at `0xF9A8`)
 
 ## Pictures
 
