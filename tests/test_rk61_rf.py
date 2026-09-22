@@ -160,6 +160,26 @@ class TestUsbFallback(RfTestCase):
         self.assertEqual(self.kb.get_xram(self.kb._static("kb", "conn_mode"), 1)[0], 1,
                          "conn_mode must switch to USB")
 
+    def test_short_press_on_active_disconnected_toggles_to_usb(self):
+        """A short press on the active channel must toggle back to USB even when
+        no host is connected - otherwise a dropped link strands the user in BLE."""
+        self.kb.mark_usb_configured()
+        # BT1 selected and paired but NOT connected (status1 bit3 = 0).
+        self.slave.set_status(0x87, 0x30)
+        self.kb.call_key(LNK_BT1, True, self.slave)
+        self.kb.call_key(LNK_BT1, False, self.slave)
+        self.kb.cold_call(self.kb._a("kb_update"), slave=self.slave)
+        self.assertEqual(self.state_byte(4), 0, "link must not be connected")
+        self.slave.frames.clear()
+        # Short-press the active channel again: BLE off, USB on.
+        self.kb.call_key(LNK_BT1, True, self.slave)
+        self.kb.call_key(LNK_BT1, False, self.slave)
+
+        usb = [f for f in self.slave.frames if f[2] == RF_CMD_USB_MODE]
+        self.assertTrue(usb, "expected the USB-mode command")
+        self.assertEqual(self.kb.get_xram(self.kb._static("kb", "conn_mode"), 1)[0], 1,
+                         "a short press on the active channel must toggle to USB even if not connected")
+
     def test_report_does_not_use_rf_after_toggle(self):
         self._toggle_to_usb()
         self.slave.frames.clear()

@@ -196,10 +196,14 @@ bool kb_process_record(uint16_t keycode, bool key_pressed)
             // Fresh press: arm the hold timer and switch channels immediately
             // unless this is the active channel, where the release decides
             // between the USB toggle and a long-press pairing.
-            link_hold_keycode     = keycode;
-            link_hold_ticks       = 0;
-            link_pairing_armed    = true;
-            link_press_was_active = (conn_mode == KEYBOARD_CONN_MODE_RF && (uint8_t)kb_keycode_to_rf_mode(keycode) == keyboard_state.rf_link && keyboard_state.connected);
+            link_hold_keycode  = keycode;
+            link_hold_ticks    = 0;
+            link_pairing_armed = true;
+            // The press is "active" when it names the channel the link is
+            // already on, whether or not a host is connected: a short press then
+            // toggles back to USB. (Requiring connected stranded the user in BLE
+            // when the link dropped.)
+            link_press_was_active = (conn_mode == KEYBOARD_CONN_MODE_RF && (uint8_t)kb_keycode_to_rf_mode(keycode) == keyboard_state.rf_link);
 
             if (conn_mode == KEYBOARD_CONN_MODE_USB) {
                 // Re-enable BLE on this channel.
