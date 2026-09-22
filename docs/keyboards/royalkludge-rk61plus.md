@@ -155,13 +155,17 @@ it to **DUTY2** — so DUTY2 is the animated duty and DUTY1 is the fixed on-time
 Because the LED columns share the key-matrix column pins, the matrix scan and the
 LED scan must be time-multiplexed.
 
-Backlight controls live on the Fn layer, next to the BT channel keys:
+Backlight and function controls follow the RK61 Plus manual:
 
 | Keys | Action |
 | --- | --- |
-| `Fn`+`R` / `Fn`+`T` | previous / next effect |
-| `Fn`+`Y` / `Fn`+`U` | animation speed down / up |
-| `Fn`+`I` / `Fn`+`O` | brightness down / up |
+| `Fn`+`\` | cycle the RGB effect |
+| `Fn`+`[` / `Fn`+`]` | brightness down / up |
+| `Fn`+`;` / `Fn`+`'` | animation speed down / up |
+| `Fn`+`Y` / `U` / `I` | PrtSc / ScrLK / Pause |
+| `Fn`+`H` / `J` / `K` | Insert / Home / PgUp |
+| `Fn`+`N` / `M` / `,` | Del / End / PgDn |
+| `Fn`+`/` / `RAlt` / `Menu` / `RCtrl` | arrows Up / Left / Down / Right |
 
 The GPIO pins P4.3, P4.5, P4.6, P0.5, P7.4 are not part of the RGB matrix (no
 PWM channel maps to them) — they are driven in the "park" routine and are likely
