@@ -5,7 +5,7 @@
 - MCU: BYK916 ([SH68F90A](../platforms/sh68f90.md))
 - Layout: 60% ANSI (61 keys)
 - Matrix: 5 rows x 14 columns
-- Backlight: per-key RGB (not yet supported; pinout traced, see below)
+- Backlight: per-key RGB
 - Wireless: BK3632 (BT and 2.4G)
 - Switches: hot-swap, plus a power on/off switch and a BLE/2.4G switch
 - PCBs: three — a key-switch PCB, a small USB hub (1x USB-C in, USB-C + USB-A out), and the main keyboard PCB
@@ -24,8 +24,8 @@ Full filing: [FCC ID 2A4MQ-RK61PLUS](https://fccid.io/2A4MQ-RK61PLUS)
 ## SMK Supported Features
 
 - [x] Key Scan
-- [~] Wireless
-- [ ] RGB Matrix
+- [x] Wireless
+- [x] RGB Matrix
 
 ## Key matrix
 
@@ -64,8 +64,15 @@ pins:
 | ACK | P4.1 |
 
 The BLE/2.4G switch selects the band; within BLE, the BT channel is chosen with
-`Fn`+`Q`/`W`/`E` (`LNK_BT1`/`LNK_BT2`/`LNK_BT3`). A long press on `Fn`+`Q`/`W`/`E`
-starts pairing for that channel.
+`Fn`+`Q`/`W`/`E` (`LNK_BT1`/`LNK_BT2`/`LNK_BT3`). A short press switches to that
+channel, a long press starts pairing for it, and a short press on the active,
+connected channel disables BLE and falls back to USB when a host is attached.
+BLE takes priority while a BT channel is connected; USB is the fallback when no
+BLE channel is active, and pressing a BT channel key re-enables it. On the direct
+2.4G band the `Fn`+`Q`/`W`/`E` BLE keys are disabled.
+
+The `Fn`+`Q`/`W`/`E` indicator shows the active channel: solid blue when
+connected, slow blink while connecting, and fast blink while pairing.
 
 ## Battery monitoring
 
@@ -110,10 +117,10 @@ Two board switches are read as active-low inputs (pull-ups enabled):
 | BLE/2.4G | P5.5 | `JNB P5.5` at `0x7C50` — high = 2.4G, low = BLE |
 | on/off | P5.6 | `JNB P5.6` at `0x7C2A` / `0x7C3D` (debounced) |
 
-Traced from the stock firmware's switch-poll routine (`0x7C00`). The on/off vs
-BLE/2.4G assignment still needs hardware confirmation.
+Traced from the stock firmware's switch-poll routine (`0x7C00`). The on/off
+switch is on P5.6; its assignment still needs hardware confirmation.
 
-## Backlight (deferred)
+## Backlight
 
 The backlight is a per-key RGB matrix driven by the SH68F90's PWM units. It is
 the transpose of the NuPhy Air60 matrix: the PWM channels are the row/colour
