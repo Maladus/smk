@@ -23,6 +23,10 @@ keyboards += {
         'options' : {
             'vendor_id' : '0x258a',
             'product_id' : '0x00c7',
+            'led_rows' : '5',
+            'led_cols' : '14',
+            'led_cx2' : '13',
+            'led_cy2' : '4',
         },
     },
 }

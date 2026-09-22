@@ -113,6 +113,28 @@
 #define RF_BB_WAKE_P0_2     _P0_2
 #define RF_BB_ACK_P4_1      _P4_1
 
+// LED row/colour sink PWM channels. The RGB matrix is the transpose of the
+// nuphy-air60: the PWM channels are the row/colour sinks and the key-matrix
+// columns are the LED columns. Each keyboard row owns three consecutive
+// channels in the order green, red, blue (see
+// docs/keyboards/royalkludge-rk61plus.md). PWM20-22 (P3.0-2) are the spare,
+// unconnected row and stay dark.
+#define LED_SINK_R0G PWM23 // Esc row
+#define LED_SINK_R0R PWM24
+#define LED_SINK_R0B PWM25
+#define LED_SINK_R1G PWM10 // Tab row
+#define LED_SINK_R1R PWM11
+#define LED_SINK_R1B PWM12
+#define LED_SINK_R2G PWM13 // Caps row
+#define LED_SINK_R2R PWM14
+#define LED_SINK_R2B PWM15
+#define LED_SINK_R3G PWM03 // Shift row
+#define LED_SINK_R3R PWM04
+#define LED_SINK_R3B PWM05
+#define LED_SINK_R4G PWM00 // Ctrl row
+#define LED_SINK_R4R PWM01
+#define LED_SINK_R4B PWM02
+
 // Custom keycodes. The RF link keys arrive with the RF phase.
 enum custom_keycodes {
     KB_SAFE_RANGE = SAFE_RANGE,
