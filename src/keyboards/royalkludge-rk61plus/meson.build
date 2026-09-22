@@ -21,8 +21,8 @@ keyboards += {
             },
         },
         'options' : {
-            'vendor_id' : '0x0603',
-            'product_id' : '0x1020',
+            'vendor_id' : '0x258a',
+            'product_id' : '0x00f8',
             'wireless' : 'bk3632',
             'led_rows' : '5',
             'led_cols' : '14',

@@ -10,7 +10,7 @@
 - Switches: hot-swap, plus a power on/off switch and a BLE/2.4G switch
 - PCBs: three — a key-switch PCB, a small USB hub (1x USB-C in, USB-C + USB-A out), and the main keyboard PCB
 - USB hub: `1a40:0801` (Terminus Technology 4-port USB 2.0 hub; the small hub PCB)
-- USB: `0603:1020` (stock device descriptor at `0xF9A8`); the keyboard enumerates behind the internal hub
+- USB: `258a:00f8` (stock firmware descriptor at `0x665B`); the ISP bootloader enumerates as `0603:1020` (descriptor at `0xF9A8`, strings at `0xF900`)
 
 ## Pictures
 
