@@ -212,32 +212,38 @@ static void vial_qmk_settings_query(uint8_t *out)
     }
 }
 
-// id_qmk_settings_get: qsid (LE16) at in[2..3], value at out[4..].
+// id_qmk_settings_get: qsid (LE16) at in[2..3]. The reference replies with a
+// status byte at out[0] and the little-endian value at out[1..] (vial-qmk
+// quantum/vial.c: `msg[0] = qmk_settings_get(qsid, &msg[1], length - 1)`).
 static void vial_qmk_settings_get(const uint8_t *in, uint8_t *out)
 {
     const uint16_t qsid = rd16le(in + 2);
+    out[0]              = 0; // success
     switch (qsid) {
         case QMK_SETTING_TAPPING_TERM: {
             const uint16_t term = dynamic_keymap_tapping_term();
-            out[4]              = (uint8_t)(term & 0xFF);
-            out[5]              = (uint8_t)(term >> 8);
+            out[1]              = (uint8_t)(term & 0xFF);
+            out[2]              = (uint8_t)(term >> 8);
             break;
         }
         case QMK_SETTING_PERMISSIVE_HOLD:
-            out[4] = dynamic_keymap_permissive_hold() ? 1 : 0;
+            out[1] = dynamic_keymap_permissive_hold() ? 1 : 0;
             break;
         case QMK_SETTING_HOLD_ON_OTHER_KEY_PRESS:
-            out[4] = dynamic_keymap_hold_on_other_key_press() ? 1 : 0;
+            out[1] = dynamic_keymap_hold_on_other_key_press() ? 1 : 0;
             break;
         default:
+            out[0] = 1; // unknown qsid
             break;
     }
 }
 
-// id_qmk_settings_set: qsid (LE16) at in[2..3], value at in[4..].
-static void vial_qmk_settings_set(const uint8_t *in)
+// id_qmk_settings_set: qsid (LE16) at in[2..3], value at in[4..]. Status byte
+// at out[0], like the reference (`msg[0] = qmk_settings_set(...)`).
+static void vial_qmk_settings_set(const uint8_t *in, uint8_t *out)
 {
     const uint16_t qsid = rd16le(in + 2);
+    out[0]              = 0; // success
     switch (qsid) {
         case QMK_SETTING_TAPPING_TERM:
             dynamic_keymap_set_tapping_term(rd16le(in + 4));
@@ -249,6 +255,7 @@ static void vial_qmk_settings_set(const uint8_t *in)
             dynamic_keymap_set_hold_on_other_key_press(in[4] != 0);
             break;
         default:
+            out[0] = 1; // unknown qsid
             break;
     }
 }
@@ -311,7 +318,7 @@ static void vial_handle_prefix(const uint8_t *in, uint8_t *out)
             return;
 
         case CMD_VIAL_QMK_SETTINGS_SET:
-            vial_qmk_settings_set(in);
+            vial_qmk_settings_set(in, out);
             return;
 
         case CMD_VIAL_QMK_SETTINGS_RESET:

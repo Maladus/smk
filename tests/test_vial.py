@@ -603,16 +603,21 @@ class TestVialProtocol(unittest.TestCase):
 
     def test_qmk_settings_get_set(self):
         out = self.kb.vial([0xFE, 0x0A, 0x07, 0x00])
-        self.assertEqual(out[4] | (out[5] << 8), 200, "default tapping term")
+        self.assertEqual(out[0], 0, "GET replies with a success status byte")
+        self.assertEqual(out[1] | (out[2] << 8), 200, "default tapping term")
         self.kb.vial([0xFE, 0x0B, 0x07, 0x00, 0xFA, 0x00])  # 250
         out = self.kb.vial([0xFE, 0x0A, 0x07, 0x00])
-        self.assertEqual(out[4] | (out[5] << 8), 250)
+        self.assertEqual(out[1] | (out[2] << 8), 250)
         self.kb.vial([0xFE, 0x0B, 0x16, 0x00, 0x00])  # permissive off
-        self.assertEqual(self.kb.vial([0xFE, 0x0A, 0x16, 0x00])[4], 0)
+        self.assertEqual(self.kb.vial([0xFE, 0x0A, 0x16, 0x00])[1], 0)
         self.kb.vial([0xFE, 0x0C])  # reset
-        self.assertEqual(self.kb.vial([0xFE, 0x0A, 0x07, 0x00])[4] | (
-            self.kb.vial([0xFE, 0x0A, 0x07, 0x00])[5] << 8), 200)
-        self.assertEqual(self.kb.vial([0xFE, 0x0A, 0x16, 0x00])[4], 1)
+        out = self.kb.vial([0xFE, 0x0A, 0x07, 0x00])
+        self.assertEqual(out[1] | (out[2] << 8), 200)
+        self.assertEqual(self.kb.vial([0xFE, 0x0A, 0x16, 0x00])[1], 1)
+
+    def test_qmk_settings_get_unknown_qsid(self):
+        out = self.kb.vial([0xFE, 0x0A, 0x63, 0x00])  # qsid 99
+        self.assertEqual(out[0], 1, "unknown qsid reports failure")
 
     def test_unhandled_via_command(self):
         self.assertEqual(self.kb.vial([0x7F])[0], 0xFF)
@@ -833,12 +838,12 @@ class TestVialTapHold(unittest.TestCase):
 
     def test_settings_reset_restores_defaults(self):
         self.kb.vial([0xFE, 0x0B, 0x07, 0x00, 0xF4, 0x01])  # term = 500
-        self.assertEqual(self.kb.vial([0xFE, 0x0A, 0x07, 0x00])[4] | (
-            self.kb.vial([0xFE, 0x0A, 0x07, 0x00])[5] << 8), 500)
+        out = self.kb.vial([0xFE, 0x0A, 0x07, 0x00])
+        self.assertEqual(out[1] | (out[2] << 8), 500)
         self.kb.vial([0xFE, 0x0C])  # reset
         out = self.kb.vial([0xFE, 0x0A, 0x07, 0x00])
-        self.assertEqual(out[4] | (out[5] << 8), 200)
-        self.assertEqual(self.kb.vial([0xFE, 0x0A, 0x16, 0x00])[4], 1, "permissive hold restored")
+        self.assertEqual(out[1] | (out[2] << 8), 200)
+        self.assertEqual(self.kb.vial([0xFE, 0x0A, 0x16, 0x00])[1], 1, "permissive hold restored")
 
 
 # --- EP1 report protocol ---------------------------------------------------
