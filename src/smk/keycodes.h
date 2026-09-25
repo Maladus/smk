@@ -30,6 +30,8 @@ enum qk_keycode_ranges : uint16_t {
     QK_ONE_SHOT_MOD_MAX            = 0x52BF,
     QK_LAYER_TAP_TOGGLE            = 0x52C0,
     QK_LAYER_TAP_TOGGLE_MAX        = 0x52DF,
+    QK_PERSISTENT_DEF_LAYER        = 0x52E0,
+    QK_PERSISTENT_DEF_LAYER_MAX    = 0x52FF,
     QK_SWAP_HANDS                  = 0x5600,
     QK_SWAP_HANDS_MAX              = 0x56FF,
     QK_TAP_DANCE                   = 0x5700,
@@ -1359,6 +1361,14 @@ enum keycode_aliases {
 
 #define SAFE_RANGE             QK_USER
 
+// Where a keyboard's custom keycodes start. Vial addresses them as QK_KB_0.. so
+// its customKeycodes map to the same range; everything else keeps SAFE_RANGE.
+#ifdef VIAL_ENABLE
+#    define KB_KEYCODE_BASE QK_KB_0
+#else
+#    define KB_KEYCODE_BASE SAFE_RANGE
+#endif
+
 // Generic decoding for the whole QK_MODS range
 #define QK_MODS_GET_MODS(kc) (((kc) >> 8) & 0x1F)
 #define QK_MODS_GET_BASIC_KEYCODE(kc) ((kc)&0xFF)
@@ -1384,6 +1394,25 @@ enum keycode_aliases {
 #define MO(layer) (QK_MOMENTARY | ((layer)&0x1F))
 #define QK_MOMENTARY_GET_LAYER(kc) ((kc)&0x1F)
 
+// Layer switch keycodes
+#define TO(layer) (QK_TO | ((layer)&0x1F))
+#define QK_TO_GET_LAYER(kc) ((kc)&0x1F)
+
+#define TG(layer) (QK_TOGGLE_LAYER | ((layer)&0x1F))
+#define QK_TOGGLE_LAYER_GET_LAYER(kc) ((kc)&0x1F)
+
+#define DF(layer) (QK_DEF_LAYER | ((layer)&0x1F))
+#define QK_DEF_LAYER_GET_LAYER(kc) ((kc)&0x1F)
+
+// Persistent default layer: like DF, but saved to the keymap store.
+#define PDF(layer) (QK_PERSISTENT_DEF_LAYER | ((layer)&0x1F))
+#define QK_PERSISTENT_DEF_LAYER_GET_LAYER(kc) ((kc)&0x1F)
+
+// Layer tap: hold for the layer, tap for the keycode. Layer is 4 bits (16 max).
+#define LT(layer, kc) (QK_LAYER_TAP | (((layer)&0xF) << 8) | ((kc)&0xFF))
+#define QK_LAYER_TAP_GET_LAYER(kc) (((kc) >> 8) & 0xF)
+#define QK_LAYER_TAP_GET_TAP_KEYCODE(kc) ((kc)&0xFF)
+
 // Range Helpers
 #define IS_QK_BASIC(code) ((code) >= QK_BASIC && (code) <= QK_BASIC_MAX)
 #define IS_QK_MODS(code) ((code) >= QK_MODS && (code) <= QK_MODS_MAX)
@@ -1397,6 +1426,7 @@ enum keycode_aliases {
 #define IS_QK_ONE_SHOT_LAYER(code) ((code) >= QK_ONE_SHOT_LAYER && (code) <= QK_ONE_SHOT_LAYER_MAX)
 #define IS_QK_ONE_SHOT_MOD(code) ((code) >= QK_ONE_SHOT_MOD && (code) <= QK_ONE_SHOT_MOD_MAX)
 #define IS_QK_LAYER_TAP_TOGGLE(code) ((code) >= QK_LAYER_TAP_TOGGLE && (code) <= QK_LAYER_TAP_TOGGLE_MAX)
+#define IS_QK_PERSISTENT_DEF_LAYER(code) ((code) >= QK_PERSISTENT_DEF_LAYER && (code) <= QK_PERSISTENT_DEF_LAYER_MAX)
 #define IS_QK_SWAP_HANDS(code) ((code) >= QK_SWAP_HANDS && (code) <= QK_SWAP_HANDS_MAX)
 #define IS_QK_TAP_DANCE(code) ((code) >= QK_TAP_DANCE && (code) <= QK_TAP_DANCE_MAX)
 #define IS_QK_MAGIC(code) ((code) >= QK_MAGIC && (code) <= QK_MAGIC_MAX)

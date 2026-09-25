@@ -12,4 +12,7 @@ src_smk += files(
     'led_effect.c',
     'sleep.c',
     'tick.c',
+    'vial.c',
+    'dynamic_keymap.c',
+    'tapping.c',
 )

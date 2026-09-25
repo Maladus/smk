@@ -72,7 +72,7 @@ extern const __code uint8_t kb_col_masks[MATRIX_COLS];
 #define LED_SCROLL_P3_6 _P3_6
 
 enum custom_keycodes {
-    FX_NEXT = SAFE_RANGE,
+    FX_NEXT = KB_KEYCODE_BASE,
     KB_LOCK,  // drops every key until pressed again
     GUI_LOCK, // drops Gui and App presses
     NKRO_TG,  // switches the report between 6KRO and NKRO

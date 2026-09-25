@@ -85,6 +85,23 @@ void usb_hw_ep1_in_complete(void) {}
 void usb_hw_ep2_in_complete(void) {}
 
 #if DEBUG == 1
+#    ifdef VIAL_ENABLE
+bool usb_hw_ep1_in_free(void)
+{
+    return !(EP1CON & _IEP1RDY);
+}
+
+void usb_hw_console_send(const __xdata uint8_t *data, uint8_t len)
+{
+    EP1_IN_BUF[0] = REPORT_ID_CONSOLE;
+    for (uint8_t i = 0; i < CONSOLE_REPORT_SIZE; i++) {
+        EP1_IN_BUF[1 + i] = (i < len) ? data[i] : 0;
+    }
+
+    SET_EP1_CNT(1 + CONSOLE_REPORT_SIZE);
+    SET_EP1_IN_RDY;
+}
+#    else
 bool usb_hw_ep2_in_free(void)
 {
     return !(EP2CON & _IEP2RDY);
@@ -100,6 +117,7 @@ void usb_hw_console_send(const __xdata uint8_t *data, uint8_t len)
     SET_EP2_CNT(1 + CONSOLE_REPORT_SIZE);
     SET_EP2_IN_RDY;
 }
+#    endif
 #endif
 
 void usb_interrupt_handler(void) __interrupt(_INT_USB)

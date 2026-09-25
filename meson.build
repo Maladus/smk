@@ -38,10 +38,6 @@ cc_model_args = [
 
 cc_base_args = cc_model_args + ['-DSMK_VERSION=@0@'.format(meson.project_version())]
 
-if get_option('nkro').enabled()
-    cc_base_args += '-DNKRO_ENABLE=1'
-endif
-
 if get_option('isp').enabled()
     cc_base_args += '-DISP_ENABLE=1'
 endif
@@ -120,31 +116,68 @@ foreach keyboard, board : keyboards
     endif
 
     spec = platforms[platform]
-    options = default_options + board['options']
     bootloader_addr = spec['flash_size'] - spec['bootloader_size']
     marker_addr = bootloader_addr - spec['sector_size']
-
-    platform_cc_args = [
-        '--xram-size',
-        '@0@'.format(spec['xram_size']),
-        '-DFREQ_SYS=@0@'.format(spec['freq_sys']),
-    ]
-
-    if spec['settings_store'] == 'flash'
-        settings_addr = marker_addr - spec['sector_size']
-        platform_cc_args += [
-            '--code-size',
-            '@0@'.format(settings_addr),
-            '-DFLASH_CFG_ADDR=@0@u'.format(settings_addr),
-            '-DFLASH_CFG_SIZE=@0@u'.format(spec['sector_size']),
-            '-DFLASH_MARKER_ADDR=@0@u'.format(marker_addr),
-        ]
-    else
-        # settings live outside the program flash, so code may run up to the marker sector
-        platform_cc_args += ['--code-size', '@0@'.format(marker_addr)]
-    endif
+    settings_addr = marker_addr - spec['sector_size']
 
     foreach layout, variant : board['layouts']
+        # Variant options win over board options, which win over the project defaults.
+        options = default_options + board['options'] + variant.get('options', {})
+
+        # Vial is opt-in per layout, and only where the platform enables it and keeps
+        # settings in flash: the keymap store takes the sectors just below settings.
+        vial = options.get('vial', false)
+        if vial
+            if not spec.get('vial', false)
+                error('layout @0@ of keyboard @1@ requests vial, but platform @2@ does not support it'.format(layout, keyboard, platform))
+            endif
+            if spec['settings_store'] != 'flash'
+                error(
+                    'layout @0@ of keyboard @1@ requests vial, but platform @2@ does not store settings in flash'.format(
+                        layout,
+                        keyboard,
+                        platform,
+                    ),
+                )
+            endif
+        endif
+
+        platform_cc_args = [
+            '--xram-size',
+            '@0@'.format(spec['xram_size']),
+            '-DFREQ_SYS=@0@'.format(spec['freq_sys']),
+        ]
+
+        if spec['settings_store'] == 'flash'
+            code_size = settings_addr
+            if vial
+                vial_keymap_sectors = options.get('vial_keymap_sectors', 2)
+                vial_layers = options.get('vial_layers', 4)
+                if vial_layers < 1 or vial_layers > 16
+                    error(
+                        'vial_layers for layout @0@ of keyboard @1@ must be between 1 and 16, got @2@'.format(layout, keyboard, vial_layers),
+                    )
+                endif
+                vial_keymap_addr = settings_addr - vial_keymap_sectors * spec['sector_size']
+                code_size = vial_keymap_addr
+                platform_cc_args += [
+                    '-DVIAL_ENABLE=1',
+                    '-DVIAL_KEYMAP_ADDR=@0@u'.format(vial_keymap_addr),
+                    '-DVIAL_LAYERS=@0@'.format(vial_layers),
+                ]
+            endif
+            platform_cc_args += [
+                '--code-size',
+                '@0@'.format(code_size),
+                '-DFLASH_CFG_ADDR=@0@u'.format(settings_addr),
+                '-DFLASH_CFG_SIZE=@0@u'.format(spec['sector_size']),
+                '-DFLASH_MARKER_ADDR=@0@u'.format(marker_addr),
+            ]
+        else
+            # settings live outside the program flash, so code may run up to the marker sector
+            platform_cc_args += ['--code-size', '@0@'.format(marker_addr)]
+        endif
+
         src_main = src_smk + src_libc + spec['src']
         inc_dirs = inc_base + [spec['dir']]
 
@@ -155,6 +188,13 @@ foreach keyboard, board : keyboards
             '-DKEYBOARD_NAME="@0@"'.format(keyboard),
             '-DLAYOUT_NAME="@0@"'.format(layout),
         ]
+
+        # NKRO is per target so a layout variant can turn it off; the project option
+        # stays the default for every target that does not set the option itself.
+        nkro = options.get('nkro', get_option('nkro').enabled())
+        if nkro
+            cc_args += '-DNKRO_ENABLE=1'
+        endif
 
         foreach key, define : usb_string_defines
             value = get_option('usb_' + key)
@@ -209,6 +249,19 @@ foreach keyboard, board : keyboards
                 capture : true,
             )
             cc_args += '-DLED_GEOMETRY_HEADER="@0@led_geometry.h"'.format(prefix)
+            cc_args += '-I' + meson.current_build_dir()
+        endif
+
+        # Vial boards bake their keyboard definition (xz-compressed JSON plus the
+        # matrix-position -> stored-slot key table) into a generated header, like
+        # the LED geometry.
+        if vial
+            configure_file(
+                output : prefix + 'vial_definition.h',
+                command : [py, join_paths(dir_base, 'utils/vial_def_gen.py'), join_paths(board['dir'], 'layouts/vial/vial.json')],
+                capture : true,
+            )
+            cc_args += '-DVIAL_DEFINITION_HEADER="@0@vial_definition.h"'.format(prefix)
             cc_args += '-I' + meson.current_build_dir()
         endif
 

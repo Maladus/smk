@@ -16,6 +16,13 @@
 static volatile bool    scan_due;
 static volatile uint8_t subframes_since_scan;
 
+#ifdef VIAL_ENABLE
+// Milliseconds for the tapping engine. Each timer2 period is 100 us (matrix
+// scan) or 400 us (LED subframe), so accumulate those and carry into ms.
+static volatile uint16_t tick_us_accum;
+static volatile uint32_t tick_ms_counter;
+#endif
+
 void tick_init(void)
 {
     scan_due             = true;
@@ -47,15 +54,41 @@ void tick_dispatch(void)
         scan_due             = false;
         subframes_since_scan = 0;
         run_matrix_scan();
+#ifdef VIAL_ENABLE
+        tick_us_accum += 100;
+        if (tick_us_accum >= 1000) {
+            tick_us_accum -= 1000;
+            tick_ms_counter++;
+        }
+#endif
         return;
     }
 
     run_led_subframe();
+#ifdef VIAL_ENABLE
+    tick_us_accum += 400;
+    if (tick_us_accum >= 1000) {
+        tick_us_accum -= 1000;
+        tick_ms_counter++;
+    }
+#endif
 
     if (++subframes_since_scan >= LED_SUBFRAMES_PER_SCAN) {
         scan_due = true;
     }
 }
+
+#ifdef VIAL_ENABLE
+uint32_t tick_ms(void)
+{
+    uint32_t value;
+    __critical
+    {
+        value = tick_ms_counter;
+    }
+    return value;
+}
+#endif
 
 void tick_pause(void)
 {

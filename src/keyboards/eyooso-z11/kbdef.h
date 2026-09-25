@@ -7,9 +7,9 @@
 #define MATRIX_COLS 14
 
 enum custom_keycodes {
-    FX_NEXT = SAFE_RANGE, // cycle to the next backlight animation
-    RST_HLD,              // held: enables the factory-reset chord
-    FCT_RST,              // factory-reset all user settings (only acts while RST_HLD is held)
+    FX_NEXT = KB_KEYCODE_BASE, // cycle to the next backlight animation
+    RST_HLD,                   // held: enables the factory-reset chord
+    FCT_RST,                   // factory-reset all user settings (only acts while RST_HLD is held)
 
     KB_SAFE_RANGE,
 };

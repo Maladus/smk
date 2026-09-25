@@ -17,6 +17,9 @@
 #include "tick.h"
 #include "sleep.h"
 #include "diag.h"
+#ifdef VIAL_ENABLE
+#    include "tapping.h"
+#endif
 #ifdef DEBUG_SINK_UART
 #    include "uart.h"
 #endif
@@ -112,10 +115,16 @@ void main(void)
         kb_update_switches();
         kb_update();
         matrix_task();
+#ifdef VIAL_ENABLE
+        tapping_task();
+#endif
 
         indicators_render();
 
         usb_task();
+#ifdef VIAL_ENABLE
+        vial_task();
+#endif
         settings_task();
         sleep_task();
 

@@ -14,7 +14,11 @@ void usb_hw_ep1_in_complete(void);
 void usb_hw_ep2_in_complete(void);
 
 #if DEBUG == 1
+#    ifdef VIAL_ENABLE
+bool usb_hw_ep1_in_free(void);
+#    else
 bool usb_hw_ep2_in_free(void);
+#    endif
 void usb_hw_console_send(const __xdata uint8_t *data, uint8_t len);
 #endif
 

@@ -13,6 +13,11 @@
 #include <stdlib.h>
 #include <stdbool.h>
 
+#ifdef VIAL_ENABLE
+#    include "dynamic_keymap.h"
+#    include "tapping.h"
+#endif
+
 typedef uint8_t matrix_col_t;
 
 matrix_col_t matrix[MATRIX_COLS];
@@ -24,6 +29,30 @@ uint8_t action_layer;
 
 uint8_t default_layer;
 
+// Vial reads keys through the dynamic store; without it the const keymap is
+// used directly, so the generated code is unchanged.
+#ifdef VIAL_ENABLE
+#    define KEYMAP_GET(layer, row, col) dynamic_keymap_get((layer), (row), (col))
+#else
+#    define KEYMAP_GET(layer, row, col) (keymaps[(layer)][(row)][(col)])
+#endif
+
+#ifdef VIAL_ENABLE
+// Layer engine state. `layer_state` holds the momentary/toggled layers; the
+// default layer is always active and is the fallthrough base. `press_layer`
+// records the layer each held key resolved under, so a release uses the same
+// keycode it pressed even after the layer state changed.
+#    if VIAL_LAYERS <= 4
+#        define VIAL_PRESS_BITS 2
+#    else
+#        define VIAL_PRESS_BITS 4
+#    endif
+#    define VIAL_PRESS_BYTES (((MATRIX_ROWS * MATRIX_COLS) * VIAL_PRESS_BITS + 7) / 8)
+
+static uint16_t layer_state;
+static uint8_t  press_layer[VIAL_PRESS_BYTES];
+#endif
+
 void matrix_init()
 {
     action_layer   = 0;
@@ -34,6 +63,14 @@ void matrix_init()
         matrix[i]          = 0;
         matrix_previous[i] = 0;
     }
+
+#ifdef VIAL_ENABLE
+    layer_state = 0;
+    for (uint8_t i = 0; i < VIAL_PRESS_BYTES; i++) {
+        press_layer[i] = 0;
+    }
+    dynamic_keymap_init();
+#endif
 }
 
 void set_default_layer(uint8_t layer)
@@ -47,7 +84,7 @@ static uint16_t resolve_keycode(uint16_t base, uint8_t row, uint8_t col)
         return base;
     }
 
-    const uint16_t overlay = keymaps[action_layer][row][col];
+    const uint16_t overlay = KEYMAP_GET(action_layer, row, col);
     return (overlay == KC_TRANSPARENT) ? base : overlay;
 }
 
@@ -84,9 +121,168 @@ static void send_keycode(uint16_t qcode, bool pressed)
     }
 }
 
+#ifdef VIAL_ENABLE
+static uint8_t press_layer_get(uint8_t row, uint8_t col)
+{
+    const uint16_t bit   = (uint16_t)((uint16_t)row * MATRIX_COLS + col) * VIAL_PRESS_BITS;
+    const uint8_t  byte  = (uint8_t)(bit >> 3);
+    const uint8_t  shift = (uint8_t)(bit & 7);
+    return (uint8_t)((press_layer[byte] >> shift) & ((1u << VIAL_PRESS_BITS) - 1u));
+}
+
+static void press_layer_set(uint8_t row, uint8_t col, uint8_t layer)
+{
+    const uint16_t bit   = (uint16_t)((uint16_t)row * MATRIX_COLS + col) * VIAL_PRESS_BITS;
+    const uint8_t  byte  = (uint8_t)(bit >> 3);
+    const uint8_t  shift = (uint8_t)(bit & 7);
+    const uint8_t  mask  = (uint8_t)(((1u << VIAL_PRESS_BITS) - 1u) << shift);
+    press_layer[byte]    = (uint8_t)((press_layer[byte] & ~mask) | ((layer << shift) & mask));
+}
+
+static uint8_t clamp_layer(uint8_t layer)
+{
+    return (layer < VIAL_LAYERS) ? layer : (uint8_t)(VIAL_LAYERS - 1);
+}
+
+// Highest active layer with a non-transparent keycode, falling through
+// transparent entries to the default layer.
+static uint8_t resolve_layer(uint8_t row, uint8_t col)
+{
+    const uint16_t state = (uint16_t)(layer_state | (uint16_t)(1u << default_layer));
+    for (int8_t l = VIAL_LAYERS - 1; l >= 0; l--) {
+        if (!(state & (uint16_t)(1u << l))) {
+            continue;
+        }
+        if (KEYMAP_GET((uint8_t)l, row, col) != KC_TRANSPARENT) {
+            return (uint8_t)l;
+        }
+    }
+    return default_layer;
+}
+
+void matrix_layer_activate(uint8_t layer)
+{
+    layer_state |= (uint16_t)(1u << clamp_layer(layer));
+}
+
+void matrix_layer_deactivate(uint8_t layer)
+{
+    layer_state &= (uint16_t)~(uint16_t)(1u << clamp_layer(layer));
+}
+
+void matrix_layer_toggle(uint8_t layer)
+{
+    layer_state ^= (uint16_t)(1u << clamp_layer(layer));
+}
+
+// Layer keycodes act on the layer state and never reach the host.
+static bool handle_layer_keycode(uint16_t kc, bool pressed)
+{
+    if (IS_QK_MOMENTARY(kc)) {
+        if (pressed) {
+            matrix_layer_activate(QK_MOMENTARY_GET_LAYER(kc));
+        } else {
+            matrix_layer_deactivate(QK_MOMENTARY_GET_LAYER(kc));
+        }
+        return true;
+    }
+
+    if (IS_QK_TOGGLE_LAYER(kc)) {
+        if (pressed) {
+            matrix_layer_toggle(QK_TOGGLE_LAYER_GET_LAYER(kc));
+        }
+        return true;
+    }
+
+    if (IS_QK_TO(kc)) {
+        if (pressed) {
+            layer_state = (uint16_t)(1u << clamp_layer(QK_TO_GET_LAYER(kc)));
+        }
+        return true;
+    }
+
+    if (IS_QK_DEF_LAYER(kc)) {
+        if (pressed) {
+            default_layer = clamp_layer(QK_DEF_LAYER_GET_LAYER(kc));
+        }
+        return true;
+    }
+
+    if (IS_QK_PERSISTENT_DEF_LAYER(kc)) {
+        if (pressed) {
+            const uint8_t layer = clamp_layer(QK_PERSISTENT_DEF_LAYER_GET_LAYER(kc));
+            if (layer != default_layer) {
+                default_layer = layer;
+                dynamic_keymap_save_base_layer(layer);
+            }
+        }
+        return true;
+    }
+
+    return false;
+}
+
+static void dispatch_keycode(uint16_t qcode, bool pressed)
+{
+    if (!kb_process_record(qcode, pressed)) {
+        return;
+    }
+
+    if (!layout_process_record(qcode, pressed)) {
+        return;
+    }
+
+    send_keycode(qcode, pressed);
+}
+
+// Normal path for one key event: resolve the layer, run the layer keycodes and
+// send what is left. The tapping engine replays buffered events through here,
+// so it never re-enters the tap/hold decision.
+void matrix_process_key(uint8_t row, uint8_t col, bool pressed)
+{
+    uint8_t  layer;
+    uint16_t kc;
+
+    if (pressed) {
+        layer = resolve_layer(row, col);
+        press_layer_set(row, col, layer);
+        kc = KEYMAP_GET(layer, row, col);
+    } else {
+        layer = press_layer_get(row, col);
+        kc    = KEYMAP_GET(layer, row, col);
+        if (kc == KC_TRANSPARENT) {
+            kc = KEYMAP_GET(default_layer, row, col);
+        }
+    }
+
+    if (handle_layer_keycode(kc, pressed)) {
+        return;
+    }
+
+    dispatch_keycode(kc, pressed);
+}
+
+// Press and release a raw keycode; used for the tap half of a layer-tap.
+void matrix_tap_keycode(uint16_t keycode)
+{
+    dispatch_keycode(keycode, true);
+    dispatch_keycode(keycode, false);
+}
+#endif // VIAL_ENABLE
+
 static void process_key_state(uint8_t row, uint8_t col, bool pressed)
 {
-    const uint16_t base = keymaps[default_layer][row][col];
+#ifdef VIAL_ENABLE
+    const uint8_t  layer = pressed ? resolve_layer(row, col) : press_layer_get(row, col);
+    const uint16_t kc    = KEYMAP_GET(layer, row, col);
+
+    if (tapping_process_record(row, col, kc, pressed)) {
+        return;
+    }
+
+    matrix_process_key(row, col, pressed);
+#else
+    const uint16_t base = KEYMAP_GET(default_layer, row, col);
 
     if (IS_QK_MOMENTARY(base)) {
         if (pressed) {
@@ -109,6 +305,7 @@ static void process_key_state(uint8_t row, uint8_t col, bool pressed)
     }
 
     send_keycode(qcode, pressed);
+#endif
 }
 
 void matrix_scan_full(void)
@@ -147,7 +344,6 @@ uint8_t matrix_task()
     if (!matrix_updated) {
         return false;
     }
-
     // Snapshot the scan-written matrix[], then diff it against
     // matrix_previous[]. No lock needed: each column byte reads atomically, so a
     // concurrent scan lands cleanly on one side of the read - at worst a
@@ -182,3 +378,13 @@ uint8_t matrix_task()
 
     return matrix_changed;
 }
+
+#ifdef VIAL_ENABLE
+bool matrix_is_on(uint8_t row, uint8_t col)
+{
+    if (row >= MATRIX_ROWS || col >= MATRIX_COLS) {
+        return false;
+    }
+    return (matrix[col] >> row) & 1;
+}
+#endif

@@ -125,7 +125,7 @@ extern uint8_t kb_p4_shadow;
     } while (0)
 
 enum custom_keycodes {
-    FX_NEXT = SAFE_RANGE,
+    FX_NEXT = KB_KEYCODE_BASE,
     GUI_LOCK, // drops Gui and App presses
     BRI_UP,
     BRI_DN,

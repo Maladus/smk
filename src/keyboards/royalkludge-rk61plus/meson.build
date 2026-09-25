@@ -19,6 +19,20 @@ keyboards += {
                     'layouts/default/layout.c',
                 ),
             },
+            'vial' : {
+                'dir' : kb_dir / 'layouts/default',
+                'src' : files(
+                    'layouts/default/indicators.c',
+                    'layouts/default/layout.c',
+                ),
+                'options' : {
+                    'vial' : true,
+                    'nkro' : false,
+                    'serial' : 'vial:f64c2b3c',
+                    'vial_layers' : 4,
+                    'vial_keymap_sectors' : 2,
+                },
+            },
         },
         'options' : {
             'vendor_id' : '0x258a',

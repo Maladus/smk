@@ -152,7 +152,7 @@ uint8_t layout_os_base_layer(bool is_mac);
 #define RF_BB_SPI_MOT_MASK  RF_BB_SPI_MOT_P0_5
 
 enum custom_keycodes {
-    LNK_24G = SAFE_RANGE,
+    LNK_24G = KB_KEYCODE_BASE,
     LNK_BT1,
     LNK_BT2,
     LNK_BT3,

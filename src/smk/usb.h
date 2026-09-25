@@ -25,6 +25,11 @@ void usb_wait_for_enumeration(void);
 // runs what the USB interrupt defers to the main loop: currently the jump into the ISP bootloader.
 void usb_task(void);
 
+#ifdef VIAL_ENABLE
+// answers a reassembled raw-HID (Vial) request on EP2 IN; call from the main loop.
+void vial_task(void);
+#endif
+
 // the part of the USB interrupt that does not vary by part; the vector calls it inside its own banking prologue.
 void usb_irq_dispatch(void);
 

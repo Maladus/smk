@@ -20,5 +20,6 @@ platforms += {
         'xram_size' : 4096,
         'freq_sys' : 24000000,
         'settings_store' : 'flash',
+        'vial' : true,
     },
 }

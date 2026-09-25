@@ -12,11 +12,20 @@
 
 #define EXTRA_REPORT_SIZE 3
 
-#define CONSOLE_REPORT_SIZE 32
+#ifdef VIAL_ENABLE
+// Vial raw-HID transport: 32-byte reports, no report id (Vial sends report 0).
+#    define RAW_HID_REPORT_SIZE 32
+// The console now shares EP1 with the keyboard, so its payload plus the report
+// id byte must fit EP1_BUF_SIZE (16 bytes).
+#    define CONSOLE_REPORT_SIZE 15
+#else
+#    define CONSOLE_REPORT_SIZE 32
+#endif
 
 enum report_id {
     REPORT_ID_SYSTEM   = 1,
     REPORT_ID_CONSUMER = 2,
+    REPORT_ID_KEYBOARD = 4,
     REPORT_ID_ISP      = 5,
     REPORT_ID_NKRO     = 6,
     REPORT_ID_CONSOLE  = 7,

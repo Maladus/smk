@@ -8,6 +8,10 @@
 #define MATRIX_ROWS 5
 #define MATRIX_COLS 14
 
+// Number of layers in the const keymap (layouts/default/layout.c). Vial seeds
+// the dynamic store from these; layers past it start transparent.
+#define KEYMAP_LAYERS 2
+
 // Row Pin Bits
 #define KB_R0_P7_1 _P7_1
 #define KB_R1_P7_2 _P7_2
@@ -153,7 +157,7 @@
 
 // Custom keycodes. Fn layer Q/W/E select the BT channel (LNK_BT1/2/3).
 enum custom_keycodes {
-    LNK_BT1 = SAFE_RANGE,
+    LNK_BT1 = KB_KEYCODE_BASE,
     LNK_BT2,
     LNK_BT3,
 
