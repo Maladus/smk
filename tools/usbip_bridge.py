@@ -115,7 +115,7 @@ class UcsimLink:
         self.send(H_KEY, bytes([row, col, 1 if pressed else 0]))
         self.recv()
 
-    def wait_idle(self, timeout: float = 2.0) -> None:
+    def wait_idle(self, timeout: float = 5.0) -> None:
         """Block until the firmware has finished the previous control transfer:
         no EP0 completion flag pending and no OUT data still queued. This is the
         handshake that stops the host from starting the next SETUP while the
@@ -152,7 +152,7 @@ class UcsimLink:
         self.wait_idle()
 
     def control(self, setup_bytes: bytes, out_data: bytes = b"", in_len: int = 0,
-                timeout: float = 2.0) -> bytes | None:
+                timeout: float = 5.0) -> bytes | None:
         """Run one control transfer. Returns the IN payload, or None on stall.
 
         The status stage direction is opposite to the data stage: control IN
@@ -333,10 +333,13 @@ class UsbIpBridge:
         return buf
 
     def _send_ret_submit(self, sock: socket.socket, urb: PendingUrb,
-                         status: int, data: bytes) -> None:
+                         status: int, data: bytes,
+                         actual_length: int | None = None) -> None:
+        if actual_length is None:
+            actual_length = len(data)
         hdr = struct.pack(">IIIII", USBIP_RET_SUBMIT, urb.seqnum, urb.devid,
                           urb.direction, urb.ep)
-        hdr += struct.pack(">iiiii", status, len(data), 0, 0, 0)
+        hdr += struct.pack(">iiiii", status, actual_length, 0, 0, 0)
         hdr += b"\x00" * 8  # header is always 48 bytes (union sized by cmd_submit)
         sock.sendall(hdr + data)
 
@@ -367,15 +370,26 @@ class UsbIpBridge:
     # -- URB handling --------------------------------------------------------
     def _handle_urb(self, sock: socket.socket, urb: PendingUrb, payload: bytes) -> None:
         if urb.ep == 0:
+            self.log("control ep0 setup", payload[:8].hex(), "dir", urb.direction, "len", urb.length)
             self.in_control = True
             try:
                 result = self._control(urb, payload)
+            except UcsimError as exc:
+                # The simulated firmware can be slow to arm the status stage;
+                # never let one stuck transfer take down the whole bridge.
+                self.log("control ep0 error:", exc)
+                result = None
             finally:
                 self.in_control = False
+            self.log("control ep0 done", "stall" if result is None else f"ok:{len(result)}")
             if result is None:
                 self._send_ret_submit(sock, urb, EPIPE, b"")
             else:
-                self._send_ret_submit(sock, urb, 0, result)
+                # A control OUT sends its data in the SUBMIT, so the RET_SUBMIT
+                # payload is empty -- but actual_length must still report the
+                # data-stage size or the kernel sees a short write and retries.
+                al = urb.length if urb.direction == USBIP_DIR_OUT else None
+                self._send_ret_submit(sock, urb, 0, result, actual_length=al)
             return
         # Interrupt IN: complete now or keep pending until the endpoint is ready.
         self.pending.append(urb)
@@ -392,7 +406,13 @@ class UsbIpBridge:
         for urb in list(self.pending):
             if now < urb.retry_at:
                 continue
-            st, pkt = self.link.poll_in(urb.ep)
+            try:
+                st, pkt = self.link.poll_in(urb.ep)
+            except UcsimError as exc:
+                self.pending.remove(urb)
+                self.log("poll error:", exc)
+                self._send_ret_submit(sock, urb, ETIMEDOUT, b"")
+                continue
             if st == ST_DATA:
                 self.pending.remove(urb)
                 self.log("complete ep", urb.ep, "len", len(pkt), "data", pkt.hex(), "urb_len", urb.length)
