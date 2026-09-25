@@ -144,11 +144,23 @@ static uint8_t clamp_layer(uint8_t layer)
     return (layer < VIAL_LAYERS) ? layer : (uint8_t)(VIAL_LAYERS - 1);
 }
 
+// Active layers as a bitmask: the momentary/toggled layers plus the default.
+// Fn+Shift also raises the secondary Fn layer, whose number row carries the
+// media keys the manual documents as Fn+F1..F12.
+static uint16_t active_layers(void)
+{
+    uint16_t state = (uint16_t)(layer_state | (uint16_t)(1u << default_layer));
+    if ((state & (uint16_t)(1u << LAYER_FN)) && (get_mods() & MODS_SHIFT_MASK)) {
+        state |= (uint16_t)(1u << LAYER_FN_SHIFT);
+    }
+    return state;
+}
+
 // Highest active layer with a non-transparent keycode, falling through
 // transparent entries to the default layer.
 static uint8_t resolve_layer(uint8_t row, uint8_t col)
 {
-    const uint16_t state = (uint16_t)(layer_state | (uint16_t)(1u << default_layer));
+    const uint16_t state = active_layers();
     for (int8_t l = VIAL_LAYERS - 1; l >= 0; l--) {
         if (!(state & (uint16_t)(1u << l))) {
             continue;

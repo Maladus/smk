@@ -9,8 +9,19 @@
 #define MATRIX_COLS 14
 
 // Number of layers in the const keymap (layouts/default/layout.c). Vial seeds
-// the dynamic store from these; layers past it start transparent.
-#define KEYMAP_LAYERS 2
+// the dynamic store from these; layers past it start transparent. The Vial
+// build adds the Fn+Shift layer (number-row media keys).
+#ifdef VIAL_ENABLE
+#    define KEYMAP_LAYERS 3
+#else
+#    define KEYMAP_LAYERS 2
+#endif
+
+// Layer indices, shared by the keymap (layouts/default/layout.c) and the layer
+// engine (src/smk/matrix.c).
+#define LAYER_BASE     0
+#define LAYER_FN       1
+#define LAYER_FN_SHIFT 2
 
 // Row Pin Bits
 #define KB_R0_P7_1 _P7_1

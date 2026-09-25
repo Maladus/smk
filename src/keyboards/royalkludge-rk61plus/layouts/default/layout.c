@@ -25,8 +25,11 @@
     { K00_4, K01_4, K02_4, KC_NO, KC_NO, K05_4, KC_NO, KC_NO, K08_4, K09_4, K10_4, KC_NO, KC_NO, K13_4 } \
 }
 
-#define _BL 0
-#define _FL 1
+#define _BL LAYER_BASE
+#define _FL LAYER_FN
+#ifdef VIAL_ENABLE
+#    define _FNS LAYER_FN_SHIFT
+#endif
 
 #define FN MO(_FL)
 
@@ -77,6 +80,20 @@ const uint16_t keymaps[][MATRIX_ROWS][MATRIX_COLS] = {
         _______, _______, _______, _______, _______, _______, KC_DEL,  KC_END,  KC_PGDN, _______, KC_UP,            _______,
         _______, _______, _______,                            _______,                   KC_LEFT, KC_DOWN, KC_RGHT, _______
     ),
+
+#ifdef VIAL_ENABLE
+    /* Keymap _FNS: (Fn+Shift) number-row multimedia keys. The manual lists
+     * these as Fn+F1..F12 -- the second function of the F1..F12 that Fn+1..=
+     * produces -- so Fn+Shift+1..= selects them here. Everything else is
+     * transparent and falls through to the Fn layer. */
+    [_FNS] = LAYOUT_60(
+        _______, KC_MY_COMPUTER, KC_WWW_HOME, KC_MAIL, KC_CALCULATOR, KC_MEDIA_SELECT, KC_MEDIA_STOP, KC_MEDIA_PREV_TRACK, KC_MEDIA_PLAY_PAUSE, KC_MEDIA_NEXT_TRACK, KC_AUDIO_MUTE, KC_AUDIO_VOL_DOWN, KC_AUDIO_VOL_UP, _______,
+        _______, _______, _______, _______, _______, _______, _______, _______, _______, _______, _______, _______, _______, _______,
+        _______, _______, _______, _______, _______, _______, _______, _______, _______, _______, _______, _______,          _______,
+        _______, _______, _______, _______, _______, _______, _______, _______, _______, _______, _______,          _______,
+        _______, _______, _______,                            _______,                   _______, _______, _______, _______
+    ),
+#endif
 };
 
 // clang-format on

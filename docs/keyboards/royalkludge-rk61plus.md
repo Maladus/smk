@@ -232,6 +232,16 @@ Backlight and function controls follow the RK61 Plus manual:
 | `Fn`+`N` / `M` / `,` | Del / End / PgDn |
 | `Fn`+`/` / `RAlt` / `Menu` / `RCtrl` | arrows Up / Left / Down / Right |
 
+`Fn`+`1`..`=` give `F1`..`F12`. The manual's multimedia functions for those
+`F`-keys sit one layer up, selected by `Fn`+`Shift` (Vial build only):
+
+| Keys | Action |
+| --- | --- |
+| `Fn`+`Shift`+`1` / `2` / `3` / `4` | Computer / Browser / Mailbox / Calculator |
+| `Fn`+`Shift`+`5` / `6` | Player / Stop |
+| `Fn`+`Shift`+`7` / `8` / `9` | Last Song / Play-Pause / Next Song |
+| `Fn`+`Shift`+`0` / `-` / `=` | Mute / Volume- / Volume+ |
+
 The GPIO pins P4.3, P4.5, P4.6, P0.5, P7.4 are not part of the RGB matrix (no
 PWM channel maps to them) — they are driven in the "park" routine and are likely
 USB-hub/charging control lines.

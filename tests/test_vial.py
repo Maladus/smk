@@ -83,6 +83,7 @@ QK_PDF = 0x52E0
 QK_LAYER_TAP = 0x4000
 
 REPORT_ID_KEYBOARD = 4
+REPORT_ID_CONSUMER = 2
 RAW_HID_REPORT_SIZE = 32
 EP1_BUF_SIZE = 16
 EP2_BUF_SIZE = 64
@@ -771,6 +772,30 @@ class TestVialLayers(unittest.TestCase):
         self.kb.key_event(FN_ROW, 0, True)
         self.kb.key_event(FN_ROW, 0, False)
         self.assertEqual(self.kb.layer_bits(), 1 << 3, "layer clamped to VIAL_LAYERS-1")
+
+    def test_fn_shift_selects_media_layer(self):
+        """Fn+Shift raises the secondary Fn layer, whose number row carries the
+        multimedia keys the manual lists as Fn+F1..F12. Plain Fn still gives
+        F1..F12, and keys the secondary layer leaves transparent fall through to
+        the Fn layer."""
+        self.kb.key_event(FN_ROW, FN_COL, True)
+        self.kb.key_event(0, 1, True)  # Fn+1
+        self.assertEqual(self.kb.report()[2], 0x3A, "Fn+1 must be F1")
+        self.kb.key_event(0, 1, False)
+
+        self.kb.key_event(3, 0, True)  # add Left Shift
+        self.kb.key_event(0, 1, True)  # Fn+Shift+1
+        self.assertEqual(self.kb.report()[2], 0, "a media key leaves the keyboard report empty")
+        consumer = [r for r in self.kb.ep1_reports() if r and r[0] == REPORT_ID_CONSUMER]
+        self.assertTrue(consumer, "Fn+Shift+1 must send a consumer report")
+        self.assertEqual(consumer[-1][1] | (consumer[-1][2] << 8), 0x0194, "Fn+Shift+1 is Computer")
+        self.kb.key_event(0, 1, False)
+
+        # Y is transparent on the secondary layer, so it still resolves on the
+        # Fn layer (PrtSc).
+        self.kb.key_event(1, 6, True)
+        self.assertEqual(self.kb.report()[2], 0x46, "Fn+Shift+Y must still be PrtSc")
+        self.kb.key_event(1, 6, False)
 
 
 # --- tap / hold ------------------------------------------------------------
