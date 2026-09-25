@@ -17,6 +17,18 @@
  * is registered as a normal uCsim variant (cpus_51[] + sim51.cc factory).
  */
 #include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <unistd.h>
+#include <fcntl.h>
+#include <errno.h>
+#include <sys/socket.h>
+#include <netinet/in.h>
+#include <arpa/inet.h>
+
+#ifndef MSG_NOSIGNAL
+#    define MSG_NOSIGNAL 0
+#endif
 
 #include "globals.h"
 #include "regs51.h"
@@ -35,13 +47,14 @@
 class cl_sh68f90_sie : public cl_hw
 {
     class cl_address_space *xram, *sfr, *iram, *rom;
-    class cl_memory_cell   *cell_ep0con, *cell_usbif2, *cell_iep0cnt;
+    class cl_memory_cell   *cell_ep0con, *cell_usbif1, *cell_usbif2, *cell_iep0cnt;
     class cl_memory_cell   *cell_ep1con, *cell_iep1cnt;
     class cl_memory_cell   *cell_ep2con, *cell_iep2cnt;
     class cl_memory_cell   *cell_pllcon;
     class cl_memory_cell   *cell_sbuf, *cell_scon;
     class cl_memory_cell   *cell_p1, *cell_p2, *cell_p3, *cell_p5, *cell_p7;
     class cl_memory_cell   *cell_p0, *cell_p4;
+    class cl_memory_cell   *cell_p6; // matrix columns C0-C7 (read-only for host injection)
     class cl_memory_cell   *cell_ibcon5, *cell_rststat, *cell_pcon;
     unsigned                pwm_acc;
     int                     in_packets;
@@ -50,6 +63,44 @@ class cl_sh68f90_sie : public cl_hw
     int      miso_bitpos;                  // BK3632 SPI: bit cursor into the 4-byte status reply.
     unsigned wdt_acc;                      // watchdog: cycles since last RSTSTAT(0xb1) kick.
     bool     wdt_armed;                    // watchdog only enforced after the firmware kicks once.
+
+    // --- host mode (Step 0: USB/IP on the Linux USB stack) ------------------
+    // Enabled by SMK_UCSIM_HOST=<port>. A TCP socket carries framed SIE
+    // transactions (RESET, SETUP, OUT, IN, SOF) between ucsim and
+    // tools/usbip_bridge.py. The test mode above stays untouched when unset.
+    bool host_on;
+    bool host_debug;
+    bool host_verbose;
+    // Cheap in-memory event ring: records SETUP/OUT/RDY/STALL/IN so a stall can
+    // dump the exact sequence that led to it without printing on every event
+    // (printing slows the simulated firmware and hides timing races).
+    unsigned      host_trace[256];
+    int           host_trace_idx;
+    int           host_listen_fd, host_fd;
+    unsigned char host_rx[8192];
+    int           host_rxlen;
+    unsigned char host_tx[8192];
+    int           host_txlen;
+    unsigned      host_poll_acc, host_sof_acc;
+    bool          host_ep0_in_ready, host_ep0_in_stall;
+    t_mem         host_ep0_in[8];
+    t_mem         host_ep0_in_len;
+    bool          host_ep1_in_ready, host_ep1_in_stall;
+    t_mem         host_ep1_in[16];
+    t_mem         host_ep1_in_len;
+    bool          host_ep2_in_ready, host_ep2_in_stall;
+    // Host-mode key matrix (RK61 Plus wiring): host_key[r] is a bitmask of pressed
+    // columns for row r. Recomputed into pin_ext on each P5/P7 read so the scan
+    // sees exactly the pressed keys (no lag, unlike a polling model).
+    unsigned host_key[8];
+    t_mem    host_ep2_in[64];
+    t_mem    host_ep2_in_len;
+    // EP0 OUT data-stage pacing: the host sends a chunk per packet, but the
+    // firmware only consumes one when OEP0RDY is set, so queue and hand them
+    // over one per tick.
+    unsigned char host_ep0_out_q[8][8];
+    unsigned char host_ep0_out_qlen[8];
+    int           host_ep0_out_qhead, host_ep0_out_qtail, host_ep0_out_qcount;
 
     // External level present on each port's pins (what the board drives). An input
     // pin reads this, not its output latch; it idles high (== the internal pull-up
@@ -77,10 +128,30 @@ class cl_sh68f90_sie : public cl_hw
         cell_sbuf = cell_scon = 0;
         cell_p1 = cell_p2 = cell_p3 = cell_p5 = cell_p7 = 0;
         cell_p0 = cell_p4 = 0;
+        cell_p6           = 0;
+        for (int i = 0; i < 8; i++)
+            host_key[i] = 0;
         pwm_acc           = 0;
         in_packets        = 0;
         rf_ack_toggle     = false;
         miso_bitpos       = 0;
+        host_on           = false;
+        host_debug        = getenv("SMK_UCSIM_HOST_DEBUG") != NULL;
+        host_verbose      = getenv("SMK_UCSIM_HOST_DEBUG_VERBOSE") != NULL;
+        host_trace_idx    = 0;
+        host_listen_fd    = -1;
+        host_fd           = -1;
+        host_rxlen        = 0;
+        host_txlen        = 0;
+        host_poll_acc     = 0;
+        host_sof_acc      = 0;
+        host_ep0_in_ready = host_ep0_in_stall = false;
+        host_ep0_in_len                       = 0;
+        host_ep1_in_ready = host_ep1_in_stall = false;
+        host_ep1_in_len                       = 0;
+        host_ep2_in_ready = host_ep2_in_stall = false;
+        host_ep2_in_len                       = 0;
+        host_ep0_out_qhead = host_ep0_out_qtail = host_ep0_out_qcount = 0;
         for (int i = 0; i < 8; i++)
             pin_ext[i] = 0xff; // pins idle high (pull-ups)
         cell_pinext_p0 = cell_pinext_p5 = cell_pinext_p7 = 0;
@@ -96,6 +167,7 @@ class cl_sh68f90_sie : public cl_hw
         rom  = uc->address_space("rom"); // code/flash space (for ISP erase/program)
         if (sfr) {
             cell_ep0con  = register_cell(sfr, 0x97); // EP0CON
+            cell_usbif1  = sfr->get_cell(0x92);      // USBIF1
             cell_usbif2  = sfr->get_cell(0x93);      // USBIF2
             cell_iep0cnt = sfr->get_cell(0x9b);      // IEP0CNT (IN byte count)
             cell_ep1con  = register_cell(sfr, 0x99); // EP1CON (keyboard report endpoint)
@@ -114,6 +186,7 @@ class cl_sh68f90_sie : public cl_hw
             cell_p7      = register_cell(sfr, 0xf8); // P7: rows R0-R2 (bits 1-3)
             cell_p0      = register_cell(sfr, 0x80); // P0: BK3632 MISO=P0.6, MOSI=P0.7, MOT=P0.5
             cell_p4      = register_cell(sfr, 0xb0); // P4: BK3632 SCK=P4.7, ACK=P4.2
+            cell_p6      = sfr->get_cell(0xc0);      // P6: matrix columns C0-C7
             cell_ibcon5  = register_cell(sfr, 0xf6); // IB_CON5: flash ISP commit (write 0x06)
             cell_rststat = register_cell(sfr, 0xb1); // RSTSTAT: watchdog kick (write 0)
             cell_pcon    = register_cell(sfr, 0x87); // PCON: bit1 -> sleep/power-down
@@ -142,6 +215,7 @@ class cl_sh68f90_sie : public cl_hw
             for (int k = 0; k < 3; k++)
                 p7_bit[p7in[k]] = register_cell(bas, 0xf8 + p7in[k]);
         }
+        host_open();
         return 0;
     }
 
@@ -150,8 +224,48 @@ class cl_sh68f90_sie : public cl_hw
     // idles high via the pull-up, modelled as pin_ext defaulting to 0xff and pulled
     // low by the board test-side). This models only the MCU's own I/O behaviour --
     // what is wired to the pins (key matrix, CONN_MODE switch, BK3632) is test-side.
+    // Recomputed on every P5/P7 read: idle rows high, pull a pressed key's row
+    // low only while its column is driven (multiplexed scan, no phantoms).
+    void host_matrix_update(void)
+    {
+        t_mem p6         = cell_p6 ? cell_p6->get() : 0xff;
+        t_mem p5         = cell_p5 ? cell_p5->get() : 0xff;
+        t_mem p4         = cell_p4 ? cell_p4->get() : 0xff;
+        bool  row_low[8] = {false};
+        for (int r = 0; r < 8; r++) {
+            for (int c = 0; c < 16; c++) {
+                if (!(host_key[r] & (1u << c))) continue;
+                bool low = false;
+                if (c < 8)
+                    low = !(p6 & (1 << c));
+                else if (c < 11)
+                    low = !(p5 & (1 << (c - 8)));
+                else if (c == 11)
+                    low = !(p5 & (1 << 7));
+                else if (c == 12)
+                    low = !(p4 & 1);
+                else if (c == 13)
+                    low = !(p4 & (1 << 2));
+                if (low) {
+                    row_low[r] = true;
+                    break;
+                }
+            }
+        }
+        t_mem pe7 = 0xff;
+        if (row_low[0]) pe7 &= ~(1 << 1);
+        if (row_low[1]) pe7 &= ~(1 << 2);
+        if (row_low[2]) pe7 &= ~(1 << 3);
+        t_mem pe5 = 0xff;
+        if (row_low[3]) pe5 &= ~(1 << 3);
+        if (row_low[4]) pe5 &= ~(1 << 4);
+        pin_ext[7] = pe7;
+        pin_ext[5] = pe5;
+    }
+
     t_mem port_read(class cl_memory_cell *cell, int n, t_addr cr_addr)
     {
+        if (host_on) host_matrix_update();
         t_mem latch = cell->get();
         t_mem cr    = sfr ? sfr->get(cr_addr) : 0; // PxCR: 1=output, 0=input
         return (latch & cr) | (pin_ext[n] & (t_mem)(~cr & 0xff));
@@ -196,6 +310,20 @@ class cl_sh68f90_sie : public cl_hw
             // effects of those scans -- the key matrix, the BK3632 -- are modelled
             // test-side; INT4 wake is likewise triggered test-side by raising EXF1.)
             pwm_acc += cycles;
+            // host mode: poll the USB/IP bridge socket and emit a 1 ms SOF
+            if (host_on) {
+                host_poll_acc += cycles;
+                if (host_poll_acc >= 2000) {
+                    host_poll_acc = 0;
+                    host_service();
+                }
+                host_sof_acc += cycles;
+                if (host_sof_acc >= 12000) {
+                    host_sof_acc = 0;
+                    if (cell_usbif1 && cell_usbif1->get() == 0) cell_usbif1->set(0x08); // SOFIF
+                }
+                if (host_ep0_out_qcount > 0) host_try_out();
+            }
             // period must exceed the matrix-scan ISR duration or the main code starves
             if (pwm_acc >= 30000) {
                 pwm_acc = 0;
@@ -243,38 +371,68 @@ class cl_sh68f90_sie : public cl_hw
         // Sleep: PCON(0x87) bit1 set = power-down/STOP (after SUSLO=0x55). The core
         // halts here until INT4 (matrix-wake) fires; the wake is injected from tick().
         if (cell == cell_pcon && ((*val) & 0x02)) fprintf(stderr, "[SIE] sleep: PCON power-down (wake on INT4 / key)\n");
+        if (host_on && host_verbose && cell == cell_ep0con && ((*val) & 0x04) && !(cell_ep0con->get() & 0x04)) fprintf(stderr, "[HOST] EP0 IN RDY len=%u\n", (unsigned)(cell_iep0cnt ? cell_iep0cnt->get() : 0));
         if (cell == cell_ep0con && ((*val) & 0x04)) // IEP0RDY: firmware queued IN data
         {
-            t_mem n = cell_iep0cnt ? cell_iep0cnt->get() : 0;
-            fprintf(stderr, "[SIE] EP0 IN[%d] %u bytes:", in_packets, (unsigned)n);
-            for (t_mem i = 0; i < n && i < 8; i++)
-                fprintf(stderr, " %02x", (unsigned)(xram->get(0x1108 + i) & 0xff));
-            fprintf(stderr, "\n");
-            in_packets++;
-            *val &= ~0x04;                                                                   // host consumed the packet -> clear ready
-            if (in_packets < 16 && cell_usbif2) cell_usbif2->set(cell_usbif2->get() | 0x01); // IEP0IF -> next chunk
+            if (host_on) {
+                // The firmware uses `EP0CON |= ...`, so a write that sets a
+                // different bit still carries a stale IEP0RDY. Only a genuine
+                // 0->1 transition means the firmware queued a new packet; a
+                // fresh RDY also cancels a stale stall.
+                if (!(cell_ep0con->get() & 0x04)) {
+                    host_ep0_in_stall = false;
+                    host_ep0_latch();
+                    host_trace_add(0x05000000 | (unsigned)host_ep0_in_len);
+                    if (host_verbose) fprintf(stderr, "[HOST] firmware EP0 IN len=%u\n", (unsigned)host_ep0_in_len);
+                }
+            } else {
+                t_mem n = cell_iep0cnt ? cell_iep0cnt->get() : 0;
+                fprintf(stderr, "[SIE] EP0 IN[%d] %u bytes:", in_packets, (unsigned)n);
+                for (t_mem i = 0; i < n && i < 8; i++)
+                    fprintf(stderr, " %02x", (unsigned)(xram->get(0x1108 + i) & 0xff));
+                fprintf(stderr, "\n");
+                in_packets++;
+                *val &= ~0x04;                                                                   // host consumed the packet -> clear ready
+                if (in_packets < 16 && cell_usbif2) cell_usbif2->set(cell_usbif2->get() | 0x01); // IEP0IF -> next chunk
+            }
+        }
+        if (host_on && cell == cell_ep0con && ((*val) & 0x08) && !(cell_ep0con->get() & 0x08)) // IEP0STL newly set
+        {
+            host_trace_add(0x06000000 | (cell_ep0con->get() & 0xff));
+            host_ep0_in_stall = true;
+            if (host_debug) host_trace_dump();
         }
         // EP1 = the keyboard's interrupt-IN report endpoint (single-packet)
         if (cell == cell_ep1con && ((*val) & 0x04)) // IEP1RDY
         {
-            t_mem n = cell_iep1cnt ? cell_iep1cnt->get() : 0;
-            fprintf(stderr, "[SIE] EP1 IN %u bytes:", (unsigned)n);
-            for (t_mem i = 0; i < n && i < 16; i++)
-                fprintf(stderr, " %02x", (unsigned)(xram->get(0x1120 + i) & 0xff));
-            fprintf(stderr, "\n");
-            *val &= ~0x04; // host consumed the report -> clear ready
+            if (host_on) {
+                host_ep1_latch();
+            } else {
+                t_mem n = cell_iep1cnt ? cell_iep1cnt->get() : 0;
+                fprintf(stderr, "[SIE] EP1 IN %u bytes:", (unsigned)n);
+                for (t_mem i = 0; i < n && i < 16; i++)
+                    fprintf(stderr, " %02x", (unsigned)(xram->get(0x1120 + i) & 0xff));
+                fprintf(stderr, "\n");
+                *val &= ~0x04; // host consumed the report -> clear ready
+            }
         }
+        if (host_on && cell == cell_ep1con && ((*val) & 0x08)) host_ep1_in_stall = true;
         // EP2 = the IF1 multiplexed interrupt-IN endpoint (NKRO keyboard + others,
         // each prefixed with a Report ID). FIFO at 0x1180, length in IEP2CNT.
         if (cell == cell_ep2con && ((*val) & 0x04)) // IEP2RDY
         {
-            t_mem n = cell_iep2cnt ? cell_iep2cnt->get() : 0;
-            fprintf(stderr, "[SIE] EP2 IN %u bytes:", (unsigned)n);
-            for (t_mem i = 0; i < n && i < 24; i++)
-                fprintf(stderr, " %02x", (unsigned)(xram->get(0x1180 + i) & 0xff));
-            fprintf(stderr, "\n");
-            *val &= ~0x04; // host consumed the report -> clear ready
+            if (host_on) {
+                host_ep2_latch();
+            } else {
+                t_mem n = cell_iep2cnt ? cell_iep2cnt->get() : 0;
+                fprintf(stderr, "[SIE] EP2 IN %u bytes:", (unsigned)n);
+                for (t_mem i = 0; i < n && i < 24; i++)
+                    fprintf(stderr, " %02x", (unsigned)(xram->get(0x1180 + i) & 0xff));
+                fprintf(stderr, "\n");
+                *val &= ~0x04; // host consumed the report -> clear ready
+            }
         }
+        if (host_on && cell == cell_ep2con && ((*val) & 0x08)) host_ep2_in_stall = true;
         // Clock PLL: report "locked" (PLLSTA) the moment firmware enables it (PLLON),
         // so clock_init()'s `while (!(PLLCON & _PLLSTA))` spin returns and the real
         // boot path (init -> usb_init -> main) runs instead of deadlocking.
@@ -286,6 +444,353 @@ class cl_sh68f90_sie : public cl_hw
         if (cell == cell_sbuf) {
             putc((char)(*val & 0xff), stderr);
             if (cell_scon) cell_scon->set(cell_scon->get() | 0x02);
+        }
+    }
+
+    // ================================================================== //
+    //  Host mode: framed SIE transactions over TCP for tools/usbip_bridge.py
+    // ================================================================== //
+    void host_open(void)
+    {
+        const char *env = getenv("SMK_UCSIM_HOST");
+        if (!env || !*env) return;
+        long port = strtol(env, NULL, 10);
+        if (port <= 0 || port > 65535) return;
+        int fd = socket(AF_INET, SOCK_STREAM, 0);
+        if (fd < 0) return;
+        int one = 1;
+        setsockopt(fd, SOL_SOCKET, SO_REUSEADDR, &one, sizeof(one));
+        struct sockaddr_in sa;
+        memset(&sa, 0, sizeof(sa));
+        sa.sin_family      = AF_INET;
+        sa.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
+        sa.sin_port        = htons((unsigned short)port);
+        if (bind(fd, (struct sockaddr *)&sa, sizeof(sa)) < 0 || listen(fd, 1) < 0) {
+            fprintf(stderr, "[HOST] cannot listen on 127.0.0.1:%ld: %s\n", port, strerror(errno));
+            close(fd);
+            return;
+        }
+        fcntl(fd, F_SETFL, O_NONBLOCK);
+        host_listen_fd = fd;
+        host_on        = true;
+        fprintf(stderr, "[HOST] ucsim host mode listening on 127.0.0.1:%ld\n", port);
+    }
+
+    void host_ep0_latch(void)
+    {
+        t_mem n = cell_iep0cnt ? cell_iep0cnt->get() : 0;
+        if (n > 8) n = 8;
+        for (t_mem i = 0; i < n; i++)
+            host_ep0_in[i] = xram ? xram->get(0x1108 + i) : 0;
+        host_ep0_in_len   = n;
+        host_ep0_in_ready = true;
+    }
+    void host_ep1_latch(void)
+    {
+        t_mem n = cell_iep1cnt ? cell_iep1cnt->get() : 0;
+        if (n > 16) n = 16;
+        for (t_mem i = 0; i < n; i++)
+            host_ep1_in[i] = xram ? xram->get(0x1120 + i) : 0;
+        host_ep1_in_len   = n;
+        host_ep1_in_ready = true;
+    }
+    void host_ep2_latch(void)
+    {
+        t_mem n = cell_iep2cnt ? cell_iep2cnt->get() : 0;
+        if (n > 64) n = 64;
+        for (t_mem i = 0; i < n; i++)
+            host_ep2_in[i] = xram ? xram->get(0x1180 + i) : 0;
+        host_ep2_in_len   = n;
+        host_ep2_in_ready = true;
+    }
+
+    void host_send(const unsigned char *buf, int len)
+    {
+        for (int i = 0; i < len && host_txlen < (int)sizeof(host_tx); i++)
+            host_tx[host_txlen++] = buf[i];
+    }
+    void host_reply_ok(void)
+    {
+        unsigned char r[3] = {0, 1, 0x4b};
+        host_send(r, 3);
+    }
+    void host_reply_status(t_mem st)
+    {
+        unsigned char r[3] = {0, 1, (unsigned char)st};
+        host_send(r, 3);
+    }
+    void host_reply_data(const t_mem *data, int len)
+    {
+        unsigned char h[3] = {(unsigned char)((len + 1) >> 8), (unsigned char)((len + 1) & 0xff), 0x44};
+        unsigned char tmp[68];
+        host_send(h, 3);
+        if (len > (int)sizeof(tmp)) len = sizeof(tmp);
+        for (int i = 0; i < len; i++)
+            tmp[i] = (unsigned char)(data[i] & 0xff);
+        host_send(tmp, len);
+    }
+
+    void host_trace_add(unsigned v)
+    {
+        if (!host_on) return;
+        host_trace[host_trace_idx & 255] = v;
+        host_trace_idx++;
+    }
+    void host_trace_dump(void)
+    {
+        int start = host_trace_idx > 256 ? host_trace_idx - 256 : 0;
+        fprintf(stderr, "[TRACE] %d events\n", host_trace_idx - start);
+        for (int i = start; i < host_trace_idx; i++) {
+            unsigned v   = host_trace[i & 255];
+            unsigned tag = v >> 24;
+            if (tag == 0x01)
+                fprintf(stderr, "[TRACE] RESET\n");
+            else if (tag == 0x02)
+                fprintf(stderr, "[TRACE] SETUP type=%02x req=%02x\n", (v >> 8) & 0xff, v & 0xff);
+            else if (tag == 0x03)
+                fprintf(stderr, "[TRACE] OUT queued n=%u\n", v & 0xff);
+            else if (tag == 0x04)
+                fprintf(stderr, "[TRACE] OUT delivered n=%u\n", v & 0xff);
+            else if (tag == 0x05)
+                fprintf(stderr, "[TRACE] EP0 IN RDY len=%u\n", v & 0xff);
+            else if (tag == 0x06)
+                fprintf(stderr, "[TRACE] EP0 IN STALL old=%02x\n", v & 0xff);
+            else if (tag == 0x07)
+                fprintf(stderr, "[TRACE] IN ep%u ready=%d stall=%d\n", (v >> 8) & 0xff, (v >> 4) & 1, v & 1);
+            else if (tag == 0x08)
+                fprintf(stderr, "[TRACE] SOF\n");
+            else
+                fprintf(stderr, "[TRACE] %08x\n", v);
+        }
+    }
+
+    void host_do_in(t_mem ep)
+    {
+        host_trace_add(0x07000000 | ((unsigned)ep << 8) | (ep == 0 ? (host_ep0_in_ready ? 0x10 : 0) | (host_ep0_in_stall ? 1 : 0) : 0));
+        if (host_verbose) fprintf(stderr, "[HOST] IN ep%u ready=%d stall=%d\n", (unsigned)ep, ep == 0 ? host_ep0_in_ready : (ep == 1 ? host_ep1_in_ready : host_ep2_in_ready), ep == 0 ? host_ep0_in_stall : (ep == 1 ? host_ep1_in_stall : host_ep2_in_stall));
+        if (ep == 0) {
+            if (host_ep0_in_stall) {
+                host_ep0_in_stall = false;
+                if (cell_ep0con) cell_ep0con->set(cell_ep0con->get() & ~0x08);
+                host_reply_status('T');
+            } else if (host_ep0_in_ready) {
+                host_ep0_in_ready = false;
+                if (cell_ep0con) cell_ep0con->set(cell_ep0con->get() & ~0x04);
+                if (cell_usbif2) cell_usbif2->set(cell_usbif2->get() | 0x01);
+                host_reply_data(host_ep0_in, host_ep0_in_len);
+            } else {
+                host_reply_status('N');
+            }
+        } else if (ep == 1) {
+            if (host_ep1_in_stall) {
+                host_ep1_in_stall = false;
+                if (cell_ep1con) cell_ep1con->set(cell_ep1con->get() & ~0x08);
+                host_reply_status('T');
+            } else if (host_ep1_in_ready) {
+                host_ep1_in_ready = false;
+                if (cell_ep1con) cell_ep1con->set(cell_ep1con->get() & ~0x04);
+                if (cell_usbif2) cell_usbif2->set(cell_usbif2->get() | 0x02);
+                host_reply_data(host_ep1_in, host_ep1_in_len);
+            } else {
+                host_reply_status('N');
+            }
+        } else if (ep == 2) {
+            if (host_ep2_in_stall) {
+                host_ep2_in_stall = false;
+                if (cell_ep2con) cell_ep2con->set(cell_ep2con->get() & ~0x08);
+                host_reply_status('T');
+            } else if (host_ep2_in_ready) {
+                host_ep2_in_ready = false;
+                if (cell_ep2con) cell_ep2con->set(cell_ep2con->get() & ~0x04);
+                if (cell_usbif2) cell_usbif2->set(cell_usbif2->get() | 0x04);
+                host_reply_data(host_ep2_in, host_ep2_in_len);
+            } else {
+                host_reply_status('N');
+            }
+        } else {
+            host_reply_status('E');
+        }
+    }
+
+    void host_process(void)
+    {
+        while (host_rxlen >= 2) {
+            int flen = (host_rx[0] << 8) | host_rx[1];
+            if (flen < 1 || flen > (int)sizeof(host_rx) - 2) {
+                host_rxlen = 0;
+                break;
+            }
+            if (host_rxlen < 2 + flen) break;
+            t_mem          op   = host_rx[2];
+            unsigned char *p    = &host_rx[3];
+            int            plen = flen - 1;
+            if (host_verbose) fprintf(stderr, "[HOST] op=%02x plen=%d\n", (unsigned)op, plen);
+            switch (op) {
+                case 0x01: // RESET
+                    host_trace_add(0x01000000);
+                    host_ep0_in_ready = host_ep0_in_stall = false;
+                    host_ep1_in_ready = host_ep1_in_stall = false;
+                    host_ep2_in_ready = host_ep2_in_stall = false;
+                    host_ep0_out_qhead = host_ep0_out_qtail = host_ep0_out_qcount = 0;
+                    // Drop a pending SOF: the firmware's dispatcher gives USBIF1
+                    // priority to SOF and would clear USBRSTIF/SETUPIF.
+                    if (cell_usbif1) cell_usbif1->set((cell_usbif1->get() & ~0x08) | 0x01); // USBRSTIF
+                    host_reply_ok();
+                    break;
+                case 0x02: // SETUP (8 bytes)
+                    if (host_verbose && plen >= 8) fprintf(stderr, "[HOST] SETUP %02x %02x %04x %04x %04x\n", p[0], p[1], p[2] | (p[3] << 8), p[4] | (p[5] << 8), p[6] | (p[7] << 8));
+                    host_trace_add(0x02000000 | (plen >= 8 ? ((unsigned)p[0] << 8) | p[1] : 0));
+                    if (plen >= 8 && xram)
+                        for (int i = 0; i < 8; i++)
+                            xram->set(0x1100 + i, p[i]);
+                    host_ep0_in_ready  = false;
+                    host_ep0_in_stall  = false;
+                    host_ep0_out_qhead = host_ep0_out_qtail = host_ep0_out_qcount = 0;
+                    // A new SETUP resets the control endpoint: drop any leftover
+                    // EP0 completion/stall state from the previous transfer.
+                    if (cell_usbif2) cell_usbif2->set(cell_usbif2->get() & ~0x11); // IEP0IF|OEP0IF
+                    // Clear OEP0RDY too, or an OUT data packet that arrives in the
+                    // same read as the SETUP overwrites EP0_OUT_BUF(0x1100) before
+                    // the firmware's setup ISR reads it, so it decodes the OUT data
+                    // as the request and stalls. The handler re-arms OEP0RDY for the
+                    // data stage; queued OUT packets wait for it.
+                    // Clear the whole EP0 handshake state (IEP0STL|OEP0STL|OEP0RDY|IEP0RDY):
+                    // a new SETUP resets the control endpoint, so the firmware's next
+                    // `EP0CON |= ...` is a genuine 0->1 transition the model can see.
+                    if (cell_ep0con) cell_ep0con->set(cell_ep0con->get() & ~0x0f);
+                    // Drop a pending SOF so the firmware dispatcher does not eat
+                    // the SETUP (see the USBIF1 priority in usb_irq_dispatch).
+                    if (cell_usbif1) cell_usbif1->set((cell_usbif1->get() & ~0x08) | 0x10); // SETUPIF
+                    host_reply_ok();
+                    break;
+                case 0x03: // OUT data stage (EP0, up to 8 bytes)
+                    if (plen >= 1) {
+                        int n = p[0];
+                        if (n > 8) n = 8;
+                        host_trace_add(0x03000000 | (unsigned)n);
+                        if (host_ep0_out_qcount < 8) {
+                            for (int i = 0; i < n; i++)
+                                host_ep0_out_q[host_ep0_out_qtail][i] = p[1 + i];
+                            host_ep0_out_qlen[host_ep0_out_qtail] = (unsigned char)n;
+                            host_ep0_out_qtail                    = (host_ep0_out_qtail + 1) % 8;
+                            host_ep0_out_qcount++;
+                        }
+                    }
+                    host_try_out();
+                    host_reply_ok();
+                    break;
+                case 0x04: // IN request (ep in payload[0])
+                    host_do_in(plen >= 1 ? p[0] : 0);
+                    break;
+                case 0x05: // SOF
+                    host_trace_add(0x08000000);
+                    if (cell_usbif1 && cell_usbif1->get() == 0) cell_usbif1->set(0x08);
+                    host_reply_ok();
+                    break;
+                case 0x07: // WAIT: OK once the previous control transfer is fully done
+                    if (host_debug) fprintf(stderr, "[HOST] WAIT q=%d if2=%02x\n", host_ep0_out_qcount, cell_usbif2 ? (unsigned)cell_usbif2->get() : 0);
+                    if (host_ep0_out_qcount == 0 && (!cell_usbif2 || (cell_usbif2->get() & 0x11) == 0))
+                        host_reply_ok();
+                    else
+                        host_reply_status('N');
+                    break;
+                case 0x08: // PINS [port, value]: set the external pin level (matrix rows)
+                    if (plen >= 2) {
+                        unsigned port = p[0];
+                        if (port == 0 && cell_pinext_p0)
+                            cell_pinext_p0->set(p[1]);
+                        else if (port == 5 && cell_pinext_p5)
+                            cell_pinext_p5->set(p[1]);
+                        else if (port == 7 && cell_pinext_p7)
+                            cell_pinext_p7->set(p[1]);
+                        else if (port < 8)
+                            pin_ext[port] = p[1];
+                    }
+                    host_reply_ok();
+                    break;
+                case 0x09: // GET_SFR [addr] -> data: read a register (matrix columns)
+                    if (plen >= 1 && sfr) {
+                        t_mem v = sfr->get(p[0]);
+                        host_reply_data(&v, 1);
+                    } else {
+                        host_reply_status('E');
+                    }
+                    break;
+                case 0x0a: // KEY [row, col, pressed]: stage a matrix key
+                    if (plen >= 3 && p[0] < 8 && p[1] < 16) {
+                        if (p[2])
+                            host_key[p[0]] |= (1u << p[1]);
+                        else
+                            host_key[p[0]] &= ~(1u << p[1]);
+                    }
+                    host_reply_ok();
+                    break;
+                case 0x06: // QUIT
+                    if (host_fd >= 0) close(host_fd);
+                    host_fd    = -1;
+                    host_rxlen = 0;
+                    return;
+                default:
+                    host_reply_status('E');
+                    break;
+            }
+            int used = 2 + flen;
+            memmove(host_rx, host_rx + used, host_rxlen - used);
+            host_rxlen -= used;
+        }
+    }
+
+    void host_try_out(void)
+    {
+        if (host_ep0_out_qcount <= 0 || !cell_ep0con || !cell_usbif2) return;
+        if (!(cell_ep0con->get() & 0x01)) return; // wait for OEP0RDY
+        if (cell_usbif2->get() & 0x10) return;    // previous OEP0IF still pending
+        unsigned char n = host_ep0_out_qlen[host_ep0_out_qhead];
+        host_trace_add(0x04000000 | (unsigned)n);
+        for (unsigned char i = 0; i < n; i++)
+            if (xram) xram->set(0x1100 + i, host_ep0_out_q[host_ep0_out_qhead][i]);
+        host_ep0_out_qhead = (host_ep0_out_qhead + 1) % 8;
+        host_ep0_out_qcount--;
+        cell_ep0con->set(cell_ep0con->get() & ~0x01); // hardware clears OEP0RDY on receive
+        cell_usbif2->set(cell_usbif2->get() | 0x10);  // OEP0IF
+    }
+
+    void host_service(void)
+    {
+        if (!host_on) return;
+        if (host_fd < 0) {
+            int fd = accept(host_listen_fd, NULL, NULL);
+            if (fd >= 0) {
+                fcntl(fd, F_SETFL, O_NONBLOCK);
+                host_fd    = fd;
+                host_rxlen = 0;
+                host_txlen = 0;
+                fprintf(stderr, "[HOST] client connected\n");
+            }
+        } else {
+            char buf[4096];
+            int  n = recv(host_fd, buf, sizeof(buf), 0);
+            if (n > 0) {
+                for (int i = 0; i < n && host_rxlen < (int)sizeof(host_rx); i++)
+                    host_rx[host_rxlen++] = (unsigned char)(buf[i] & 0xff);
+                host_process();
+            } else if (n == 0 || (n < 0 && errno != EAGAIN && errno != EWOULDBLOCK)) {
+                fprintf(stderr, "[HOST] client disconnected\n");
+                close(host_fd);
+                host_fd    = -1;
+                host_rxlen = 0;
+            }
+        }
+        if (host_fd >= 0 && host_txlen > 0) {
+            int sent = send(host_fd, host_tx, host_txlen, MSG_NOSIGNAL);
+            if (sent > 0) {
+                memmove(host_tx, host_tx + sent, host_txlen - sent);
+                host_txlen -= sent;
+            } else if (sent < 0 && errno != EAGAIN && errno != EWOULDBLOCK) {
+                close(host_fd);
+                host_fd    = -1;
+                host_txlen = 0;
+            }
         }
     }
 };
@@ -338,6 +843,35 @@ void cl_sh68f90_interrupt::added_to_uc(void)
     is->init();
     uc->it_sources->add(is = new cl_it_src(uc, 0x102, sfr->get_cell(0xa9), 0x01, sfr->get_cell(0x93), 0x10, // OEP0IF
                                            0x003b, false, false, "USB EP0-OUT (SH68F90)", 7));
+    is->init();
+    // The remaining USBIF1 flags and the EP1/EP2 completion flags (host mode
+    // drives these; test mode leaves them clear). Same USB vector, EUSB gate.
+    uc->it_sources->add(is = new cl_it_src(uc, 0x109, sfr->get_cell(0xa9), 0x01, sfr->get_cell(0x92), 0x01, // USBRSTIF
+                                           0x003b, false, false, "USB reset (SH68F90)", 7));
+    is->init();
+    uc->it_sources->add(is = new cl_it_src(uc, 0x10a, sfr->get_cell(0xa9), 0x01, sfr->get_cell(0x92), 0x02, // SUSPIF
+                                           0x003b, false, false, "USB suspend (SH68F90)", 7));
+    is->init();
+    uc->it_sources->add(is = new cl_it_src(uc, 0x10b, sfr->get_cell(0xa9), 0x01, sfr->get_cell(0x92), 0x04, // RESMIF
+                                           0x003b, false, false, "USB resume (SH68F90)", 7));
+    is->init();
+    uc->it_sources->add(is = new cl_it_src(uc, 0x10c, sfr->get_cell(0xa9), 0x01, sfr->get_cell(0x92), 0x08, // SOFIF
+                                           0x003b, false, false, "USB SOF (SH68F90)", 7));
+    is->init();
+    uc->it_sources->add(is = new cl_it_src(uc, 0x10d, sfr->get_cell(0xa9), 0x01, sfr->get_cell(0x92), 0x80, // PUPIF
+                                           0x003b, false, false, "USB power-up (SH68F90)", 7));
+    is->init();
+    uc->it_sources->add(is = new cl_it_src(uc, 0x10e, sfr->get_cell(0xa9), 0x01, sfr->get_cell(0x93), 0x02, // IEP1IF
+                                           0x003b, false, false, "USB EP1-IN (SH68F90)", 7));
+    is->init();
+    uc->it_sources->add(is = new cl_it_src(uc, 0x10f, sfr->get_cell(0xa9), 0x01, sfr->get_cell(0x93), 0x04, // IEP2IF
+                                           0x003b, false, false, "USB EP2-IN (SH68F90)", 7));
+    is->init();
+    uc->it_sources->add(is = new cl_it_src(uc, 0x110, sfr->get_cell(0xa9), 0x01, sfr->get_cell(0x93), 0x20, // OEP1IF
+                                           0x003b, false, false, "USB EP1-OUT (SH68F90)", 7));
+    is->init();
+    uc->it_sources->add(is = new cl_it_src(uc, 0x111, sfr->get_cell(0xa9), 0x01, sfr->get_cell(0x93), 0x40, // OEP2IF
+                                           0x003b, false, false, "USB EP2-OUT (SH68F90)", 7));
     is->init();
     // SH68F90 UART TX-complete interrupt (_INT_EUART0 = vector 13 @ 0x6B).
     // enable IEN1(0xa9)._ES0(0x40); request SCON(0xd8).TI(0x02). The SIE sets TI on
