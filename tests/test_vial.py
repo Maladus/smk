@@ -81,6 +81,9 @@ QK_DF = 0x5240
 QK_TG = 0x5260
 QK_PDF = 0x52E0
 QK_LAYER_TAP = 0x4000
+QK_LAYER_MOD = 0x5000
+QK_ONE_SHOT_LAYER = 0x5280
+QK_LAYER_TAP_TOGGLE = 0x52C0
 
 REPORT_ID_KEYBOARD = 4
 REPORT_ID_CONSUMER = 2
@@ -796,6 +799,47 @@ class TestVialLayers(unittest.TestCase):
         self.kb.key_event(1, 6, True)
         self.assertEqual(self.kb.report()[2], 0x46, "Fn+Shift+Y must still be PrtSc")
         self.kb.key_event(1, 6, False)
+
+    def test_tt_tap_toggles_and_hold_is_momentary(self):
+        self.kb.set_keycode(0, FN_ROW, 0, QK_LAYER_TAP_TOGGLE | 2)
+        self.kb.set_tick(0)
+        self.kb.key_event(FN_ROW, 0, True)
+        self.kb.set_tick(10)  # under the term: a tap
+        self.kb.key_event(FN_ROW, 0, False)
+        self.assertEqual(self.kb.layer_bits(), 1 << 2, "TT tap toggles the layer on")
+        self.kb.set_tick(100)
+        self.kb.key_event(FN_ROW, 0, True)
+        self.kb.set_tick(110)
+        self.kb.key_event(FN_ROW, 0, False)
+        self.assertEqual(self.kb.layer_bits(), 0, "TT tap toggles the layer off")
+        self.kb.set_tick(200)
+        self.kb.key_event(FN_ROW, 0, True)
+        self.kb.set_tick(600)
+        self.kb.tapping_task()
+        self.assertEqual(self.kb.layer_bits(), 1 << 2, "TT hold activates the layer")
+        self.kb.key_event(FN_ROW, 0, False)
+        self.assertEqual(self.kb.layer_bits(), 0, "TT hold releases the layer")
+
+    def test_osl_active_for_one_key(self):
+        self.kb.set_keycode(0, FN_ROW, 0, QK_ONE_SHOT_LAYER | 2)
+        self.kb.set_keycode(2, 0, 1, KC_A)
+        self.kb.key_event(FN_ROW, 0, True)
+        self.kb.key_event(FN_ROW, 0, False)
+        self.assertEqual(self.kb.layer_bits(), 1 << 2, "OSL stays active after its own release")
+        self.kb.key_event(0, 1, True)
+        self.assertEqual(self.kb.report()[2], KC_A, "the next key resolves on the OSL layer")
+        self.kb.key_event(0, 1, False)
+        self.assertEqual(self.kb.layer_bits(), 0, "OSL clears on the consuming key's release")
+
+    def test_lm_holds_layer_and_mod(self):
+        # QK_LAYER_MOD only spans layers 0..1 (QK_LAYER_MOD_MAX == 0x51FF).
+        self.kb.set_keycode(0, FN_ROW, 0, QK_LAYER_MOD | (1 << 8) | 0x02)  # LM(1, LSFT)
+        self.kb.key_event(FN_ROW, 0, True)
+        self.assertEqual(self.kb.layer_bits(), 1 << 1)
+        self.assertEqual(self.kb.report()[0], 0x02, "LM applies the modifier")
+        self.kb.key_event(FN_ROW, 0, False)
+        self.assertEqual(self.kb.layer_bits(), 0)
+        self.assertEqual(self.kb.report()[0], 0, "LM clears the modifier")
 
 
 # --- tap / hold ------------------------------------------------------------

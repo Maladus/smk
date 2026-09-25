@@ -16,8 +16,9 @@
 #    define TAPPING_BUFFER 8
 
 typedef struct {
-    bool     undecided;   // an LT press is waiting for the term
+    bool     undecided;   // an LT/TT press is waiting for the term
     bool     hold_active; // decided hold; the layer stays on until release
+    bool     tap_toggle;  // tap toggles the layer (TT) instead of tapping a keycode
     uint8_t  row;
     uint8_t  col;
     uint8_t  hold_layer;
@@ -63,8 +64,29 @@ static void decide_hold(void)
 static void decide_tap(void)
 {
     tapping.undecided = false;
-    matrix_tap_keycode(tapping.tap_keycode);
+    if (tapping.tap_toggle) {
+        matrix_layer_toggle(tapping.hold_layer);
+    } else {
+        matrix_tap_keycode(tapping.tap_keycode);
+    }
     replay();
+}
+
+// Arm the tap/hold decision for an LT (tap_keycode) or TT (tap_toggle) key.
+static void arm(uint8_t row, uint8_t col, uint8_t layer, uint16_t tap_keycode, bool tap_toggle)
+{
+    if (layer >= VIAL_LAYERS) {
+        layer = (uint8_t)(VIAL_LAYERS - 1);
+    }
+    tapping.undecided   = true;
+    tapping.hold_active = false;
+    tapping.row         = row;
+    tapping.col         = col;
+    tapping.hold_layer  = layer;
+    tapping.tap_keycode = tap_keycode;
+    tapping.tap_toggle  = tap_toggle;
+    tapping.start_ms    = tick_ms();
+    tapping.count       = 0;
 }
 
 bool tapping_process_record(uint8_t row, uint8_t col, uint16_t keycode, bool pressed)
@@ -103,18 +125,12 @@ bool tapping_process_record(uint8_t row, uint8_t col, uint16_t keycode, bool pre
     }
 
     if (pressed && IS_QK_LAYER_TAP(keycode)) {
-        uint8_t layer = QK_LAYER_TAP_GET_LAYER(keycode);
-        if (layer >= VIAL_LAYERS) {
-            layer = (uint8_t)(VIAL_LAYERS - 1);
-        }
-        tapping.undecided   = true;
-        tapping.hold_active = false;
-        tapping.row         = row;
-        tapping.col         = col;
-        tapping.hold_layer  = layer;
-        tapping.tap_keycode = QK_LAYER_TAP_GET_TAP_KEYCODE(keycode);
-        tapping.start_ms    = tick_ms();
-        tapping.count       = 0;
+        arm(row, col, QK_LAYER_TAP_GET_LAYER(keycode), QK_LAYER_TAP_GET_TAP_KEYCODE(keycode), false);
+        return true;
+    }
+
+    if (pressed && IS_QK_LAYER_TAP_TOGGLE(keycode)) {
+        arm(row, col, QK_LAYER_TAP_TOGGLE_GET_LAYER(keycode), 0, true);
         return true;
     }
 

@@ -51,6 +51,12 @@ uint8_t default_layer;
 
 static uint16_t layer_state;
 static uint8_t  press_layer[VIAL_PRESS_BYTES];
+
+// One-shot layer (OSL): active from its press until the next key is released.
+static uint8_t osl_layer = 0xFF;
+static uint8_t osl_used;
+static uint8_t osl_row;
+static uint8_t osl_col;
 #endif
 
 void matrix_init()
@@ -66,6 +72,8 @@ void matrix_init()
 
 #ifdef VIAL_ENABLE
     layer_state = 0;
+    osl_layer   = 0xFF;
+    osl_used    = 0;
     for (uint8_t i = 0; i < VIAL_PRESS_BYTES; i++) {
         press_layer[i] = 0;
     }
@@ -187,6 +195,39 @@ void matrix_layer_toggle(uint8_t layer)
     layer_state ^= (uint16_t)(1u << clamp_layer(layer));
 }
 
+static void osl_activate(uint8_t layer)
+{
+    if (osl_layer != 0xFF) {
+        matrix_layer_deactivate(osl_layer);
+    }
+    osl_layer = clamp_layer(layer);
+    osl_used  = 0;
+    matrix_layer_activate(osl_layer);
+}
+
+// Consume the one-shot layer on the first key press, then clear it when that
+// key is released. The OSL key itself is handled by handle_layer_keycode, so it
+// never reaches here.
+static void osl_update(uint8_t row, uint8_t col, bool pressed)
+{
+    if (osl_layer == 0xFF) {
+        return;
+    }
+    if (!osl_used) {
+        if (pressed) {
+            osl_used = 1;
+            osl_row  = row;
+            osl_col  = col;
+        }
+        return;
+    }
+    if (!pressed && row == osl_row && col == osl_col) {
+        matrix_layer_deactivate(osl_layer);
+        osl_layer = 0xFF;
+        osl_used  = 0;
+    }
+}
+
 // Layer keycodes act on the layer state and never reach the host.
 static bool handle_layer_keycode(uint16_t kc, bool pressed)
 {
@@ -231,6 +272,25 @@ static bool handle_layer_keycode(uint16_t kc, bool pressed)
         return true;
     }
 
+    if (IS_QK_LAYER_MOD(kc)) {
+        if (pressed) {
+            matrix_layer_activate(QK_LAYER_MOD_GET_LAYER(kc));
+            add_mods((uint8_t)QK_LAYER_MOD_GET_MODS(kc));
+        } else {
+            matrix_layer_deactivate(QK_LAYER_MOD_GET_LAYER(kc));
+            del_mods((uint8_t)QK_LAYER_MOD_GET_MODS(kc));
+        }
+        send_keyboard_report();
+        return true;
+    }
+
+    if (IS_QK_ONE_SHOT_LAYER(kc)) {
+        if (pressed) {
+            osl_activate(QK_ONE_SHOT_LAYER_GET_LAYER(kc));
+        }
+        return true;
+    }
+
     return false;
 }
 
@@ -271,6 +331,7 @@ void matrix_process_key(uint8_t row, uint8_t col, bool pressed)
         return;
     }
 
+    osl_update(row, col, pressed);
     dispatch_keycode(kc, pressed);
 }
 

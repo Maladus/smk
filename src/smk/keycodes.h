@@ -1413,6 +1413,19 @@ enum keycode_aliases {
 #define QK_LAYER_TAP_GET_LAYER(kc) (((kc) >> 8) & 0xF)
 #define QK_LAYER_TAP_GET_TAP_KEYCODE(kc) ((kc)&0xFF)
 
+// Layer tap toggle: hold for the layer, tap to toggle it on/off.
+#define TT(layer) (QK_LAYER_TAP_TOGGLE | ((layer)&0x1F))
+#define QK_LAYER_TAP_TOGGLE_GET_LAYER(kc) ((kc)&0x1F)
+
+// One-shot layer: active until the next key is released.
+#define OSL(layer) (QK_ONE_SHOT_LAYER | ((layer)&0x1F))
+#define QK_ONE_SHOT_LAYER_GET_LAYER(kc) ((kc)&0x1F)
+
+// Layer mod: hold for the layer and the modifier together. Layer is 4 bits.
+#define LM(layer, mod) (QK_LAYER_MOD | (((layer)&0xF) << 8) | ((mod)&0x1F))
+#define QK_LAYER_MOD_GET_LAYER(kc) (((kc) >> 8) & 0xF)
+#define QK_LAYER_MOD_GET_MODS(kc) ((kc)&0x1F)
+
 // Range Helpers
 #define IS_QK_BASIC(code) ((code) >= QK_BASIC && (code) <= QK_BASIC_MAX)
 #define IS_QK_MODS(code) ((code) >= QK_MODS && (code) <= QK_MODS_MAX)
