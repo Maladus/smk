@@ -392,6 +392,8 @@ class cl_sh68f90_sie : public cl_hw
                     host_ep0_latch();
                     host_trace_add(0x05000000 | (unsigned)host_ep0_in_len);
                     if (host_verbose) fprintf(stderr, "[HOST] firmware EP0 IN len=%u\n", (unsigned)host_ep0_in_len);
+                } else if (host_verbose) {
+                    fprintf(stderr, "[HOST] EP0 IN RDY stale-skip ready=%d cnt=%u\n", host_ep0_in_ready ? 1 : 0, (unsigned)(cell_iep0cnt ? cell_iep0cnt->get() : 0));
                 }
             } else {
                 t_mem n = cell_iep0cnt ? cell_iep0cnt->get() : 0;
@@ -408,6 +410,7 @@ class cl_sh68f90_sie : public cl_hw
         {
             host_trace_add(0x06000000 | (cell_ep0con->get() & 0xff));
             host_ep0_in_stall = true;
+            if (host_verbose) fprintf(stderr, "[HOST] EP0 IN STALL set ready=%d cnt=%u\n", host_ep0_in_ready ? 1 : 0, (unsigned)(cell_iep0cnt ? cell_iep0cnt->get() : 0));
             if (host_debug) host_trace_dump();
         }
         // EP1 = the keyboard's interrupt-IN report endpoint (single-packet)
