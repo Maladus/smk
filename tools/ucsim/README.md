@@ -18,8 +18,10 @@ hardware tests instead.
   URBs into SIE transactions and keeps interrupt IN URBs pending until the
   firmware sets `IEPnRDY`, like the real device NAKing until it has data. It
   also waits for the simulated firmware to finish each control transfer
-  (`WAIT`) before starting the next, and exposes a local matrix-control port so
-  a test can type through the emulated key matrix.
+  (`WAIT`) before starting the next, sends the `SET_ADDRESS` the kernel's vhci
+  never forwards (the SMK firmware only accepts `SET_CONFIGURATION` once
+  addressed), and exposes a local matrix-control port so a test can type
+  through the emulated key matrix.
 - `start-usbip-device.sh` — starts ucsim and the bridge, then loads
   `vhci-hcd` and runs `usbip attach` (needs root and the `usbip` user tools).
 - `host_selftest.py` — the same path without root: starts ucsim and the bridge,
@@ -43,6 +45,18 @@ tools/ucsim/start-usbip-device.sh build/royalkludge-rk61plus_default_smk.hex
 `--no-attach` skips the privileged part and only runs ucsim and the bridge.
 The start script waits for Ctrl-C; the firmware keeps running in ucsim until
 then.
+
+If you have neither root nor `sudo`, run the attach from a root container that
+shares this kernel and bind-mounts the host `/sys` (no `--privileged` needed):
+
+```
+SMK_USBIP_ATTACH=docker tools/ucsim/start-usbip-device.sh build/royalkludge-rk61plus_vial_smk.hex
+```
+
+The device then shows up in `lsusb`/`dmesg`, its keyboard becomes a real
+`/dev/input/event*`, and the matrix-control port can drive it. Reading the
+input/hidraw nodes from a container needs the device cgroup to allow them, e.g.
+`--device-cgroup-rule='c 13:* rmw'` for input and `'c 240:* rmw'` for hidraw.
 
 Without root (or without the `usbip` tools) the components still run:
 

@@ -304,6 +304,7 @@ class UsbIpBridge:
 
     def _handle_control_line(self, line: str) -> None:
         parts = line.split()
+        self.log("control:", line)
         try:
             if parts and parts[0] == "press":
                 self.link.set_key(int(parts[1]), int(parts[2]), True)
@@ -352,6 +353,14 @@ class UsbIpBridge:
         elif code == OP_REQ_IMPORT:
             common = struct.pack(">HHI", USBIP_VERSION, OP_REP_IMPORT, 0)
             sock.sendall(common + self.device.pack())
+            # The kernel's vhci handles addressing itself and never forwards
+            # SET_ADDRESS, but the SMK firmware only accepts SET_CONFIGURATION
+            # once it has been addressed. Supply it so the device reaches
+            # CONFIGURED and actually sends reports.
+            try:
+                self.link.control(bytes([0x00, 5, 1, 0, 0, 0, 0, 0]))
+            except UcsimError as exc:
+                self.log("SET_ADDRESS inject failed:", exc)
         else:
             raise ValueError(f"unexpected op {code:#x}")
 
@@ -386,6 +395,7 @@ class UsbIpBridge:
             st, pkt = self.link.poll_in(urb.ep)
             if st == ST_DATA:
                 self.pending.remove(urb)
+                self.log("complete ep", urb.ep, "len", len(pkt), "data", pkt.hex(), "urb_len", urb.length)
                 data = pkt[:urb.length] if urb.length else pkt
                 self._send_ret_submit(sock, urb, 0, data)
             elif st == ST_STALL:
@@ -399,7 +409,10 @@ class UsbIpBridge:
 
     def _maybe_sof(self) -> None:
         now = time.monotonic()
-        if self.in_control or self.pending:
+        # Only skip SOFs during a control transfer. A permanently pending
+        # interrupt-IN URB (the kernel's usbhid keeps one queued) must not stop
+        # the frame ticks, or the firmware loses its bus timing.
+        if self.in_control:
             return
         if now - self.sof_at < 0.001:
             return

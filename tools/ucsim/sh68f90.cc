@@ -261,6 +261,14 @@ class cl_sh68f90_sie : public cl_hw
         if (row_low[4]) pe5 &= ~(1 << 4);
         pin_ext[7] = pe7;
         pin_ext[5] = pe5;
+        if (host_verbose) {
+            static unsigned last = 0xffff;
+            unsigned        now  = pe7 | ((unsigned)pe5 << 8);
+            if (now != last) {
+                fprintf(stderr, "[HOST] matrix pins p7=%02x p5=%02x\n", (unsigned)pe7, (unsigned)pe5);
+                last = now;
+            }
+        }
     }
 
     t_mem port_read(class cl_memory_cell *cell, int n, t_addr cr_addr)
@@ -493,6 +501,7 @@ class cl_sh68f90_sie : public cl_hw
             host_ep1_in[i] = xram ? xram->get(0x1120 + i) : 0;
         host_ep1_in_len   = n;
         host_ep1_in_ready = true;
+        if (host_verbose) fprintf(stderr, "[HOST] EP1 latch len=%u\n", (unsigned)n);
     }
     void host_ep2_latch(void)
     {

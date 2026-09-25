@@ -14,6 +14,11 @@
 #   SMK_UCSIM_PORT   ucsim host-mode TCP port (default: 3241)
 #   SMK_USBIP_BUSID  bus id advertised to the kernel (default: 1-1)
 #   SMK_USBIP_CONTROL_PORT  matrix-control port (default: 3242, 0 = off)
+#   SMK_USBIP_ATTACH  how to get root for the vhci attach: `sudo` (default) or
+#                    `docker` (a root container sharing the host kernel; no sudo)
+#   SMK_USBIP_BIN    usbip binary to mount in docker mode
+#                    (default: /run/usbipd-win/usbip)
+#   SMK_USBIP_IMAGE  container image for docker mode (default: alpine:3.20)
 #
 set -euo pipefail
 
@@ -76,7 +81,15 @@ BRIDGE_PID=$!
 sleep 0.5
 
 if [[ "$ATTACH" == yes ]]; then
-    if ! command -v usbip >/dev/null 2>&1; then
+    if [[ "${SMK_USBIP_ATTACH:-sudo}" == docker ]]; then
+        # Docker shares this kernel, so a root container writing the host's
+        # vhci sysfs attaches the device to this kernel without sudo.
+        USBIP_BIN="${SMK_USBIP_BIN:-/run/usbipd-win/usbip}"
+        IMAGE="${SMK_USBIP_IMAGE:-alpine:3.20}"
+        docker run --rm --net=host -v /sys:/sys -v "$USBIP_BIN":/usr/bin/usbip:ro "$IMAGE" \
+            usbip attach -r 127.0.0.1 -b "$BUSID"
+        echo "attached via docker; check with: lsusb -v ; dmesg | tail"
+    elif ! command -v usbip >/dev/null 2>&1; then
         echo "usbip user tools not found; skipping attach (simulator + bridge are running)" >&2
     else
         sudo modprobe vhci-hcd
