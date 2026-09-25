@@ -371,20 +371,23 @@ static void vial_get_matrix_state(uint8_t *out)
     }
 }
 
-// id_dynamic_keymap_get_buffer: offset (BE) at in[1..2], size at in[3], reply
-// keycodes at out[4..], each big-endian.
+// id_dynamic_keymap_get_buffer: byte offset (BE) at in[1..2], byte size at
+// in[3], reply keycodes at out[4..], each big-endian. Both are byte counts:
+// Vial's reload_keymap walks `layers*rows*cols*2` bytes in 28-byte chunks, so
+// the keycode index is offset/2 and the chunk holds size/2 keycodes.
 static void vial_keymap_get_buffer(const uint8_t *in, uint8_t *out)
 {
     const uint16_t offset = rd16be(in + 1);
-    uint8_t        size   = in[3]; // <= 28
+    uint8_t        size   = in[3]; // <= 28 bytes
     if (size > 28) {
         size = 28;
     }
-    for (uint8_t i = 0; i < size; i++) {
-        uint8_t  layer, row, col;
-        uint16_t kc        = keymap_pos((uint16_t)(offset + i), &layer, &row, &col) ? vial_keymap_get(layer, row, col) : KC_NO;
-        out[4 + i * 2]     = (uint8_t)(kc >> 8);
-        out[4 + i * 2 + 1] = (uint8_t)kc;
+    for (uint8_t i = 0; i < size; i += 2) {
+        uint8_t        layer, row, col;
+        const uint16_t idx = (uint16_t)(offset / 2u + i / 2u);
+        const uint16_t kc  = keymap_pos(idx, &layer, &row, &col) ? vial_keymap_get(layer, row, col) : KC_NO;
+        out[4 + i]         = (uint8_t)(kc >> 8);
+        out[4 + i + 1]     = (uint8_t)kc;
     }
 }
 

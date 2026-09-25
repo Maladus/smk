@@ -68,8 +68,10 @@ ESC_ROW, ESC_COL = 0, 0
 MATRIX_COLS = 14
 
 KC_A = 0x0004
+KC_Q = 0x0014
 KC_1 = 0x001E
 KC_ESC = 0x0029
+KC_TAB = 0x002B
 KC_SPC = 0x002C
 KC_GRV = 0x0035
 KC_LEFT = 0x0050
@@ -687,6 +689,12 @@ class TestVialKeymap(unittest.TestCase):
         out = self.kb.vial([0x12, 0x00, 0x00, 0x04])
         self.assertEqual((out[4] << 8) | out[5], KC_ESC)
         self.assertEqual((out[6] << 8) | out[7], KC_1)
+        # offset and size are byte counts, so offset 0x1c is keycode 14: the
+        # start of row 1 (Tab, Q). Reading them as keycode counts would return
+        # keycode 28 (row 2, Caps) instead.
+        out = self.kb.vial([0x12, 0x00, 0x1C, 0x04])
+        self.assertEqual((out[4] << 8) | out[5], KC_TAB)
+        self.assertEqual((out[6] << 8) | out[7], KC_Q)
         self.kb.vial([0x13, 0x00, 0x00, 0x04, 0x00, 0x04, 0x00, 0x05])  # A, B
         self.assertEqual(self.kb.get_keycode(0, ESC_ROW, ESC_COL), KC_A)
         self.assertEqual(self.kb.get_keycode(0, 0, 1), 0x0005)
