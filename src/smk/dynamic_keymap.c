@@ -129,12 +129,13 @@ static int16_t payload_index(uint8_t layer, uint8_t row, uint8_t col)
 
 static uint16_t payload_read(uint16_t idx)
 {
-    // --stack-auto puts locals on the stack, so the xdata read buffer must be
-    // static. Only the main loop reads keycodes.
-    static __xdata uint8_t b[2];
-    const uint16_t         addr = (uint16_t)(sector_addr(active_sector) + KM_PAYLOAD + idx * 2u);
-    flash_read_into(FLASH_CODE, addr, b, 2);
-    return (uint16_t)(((uint16_t)b[0] << 8) | b[1]);
+    // The active keymap is kept in the keymap_sector staging buffer (RAM):
+    // dynamic_keymap_init() loads it via store_begin(), seed_defaults() fills it,
+    // and store_commit() edits it before writing. Reading keycodes from flash on
+    // every key event was slow (each read ran with interrupts off), so resolve
+    // them from RAM instead.
+    const uint16_t off = (uint16_t)(KM_PAYLOAD + idx * 2u);
+    return (uint16_t)(((uint16_t)keymap_sector[off] << 8) | keymap_sector[off + 1]);
 }
 
 // Copy the active sector into the staging buffer so a caller can edit one field

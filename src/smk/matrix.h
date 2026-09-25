@@ -6,6 +6,10 @@
 void    matrix_init();
 uint8_t matrix_task();
 
+// True when the top-left key (R0/C0) is held at power-on. Call before
+// matrix_init() to hand a wedged image back to the ISP bootloader.
+bool matrix_recovery_held(void);
+
 void matrix_scan_full();
 
 #ifdef VIAL_ENABLE

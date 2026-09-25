@@ -1,0 +1,123 @@
+#!/usr/bin/env bash
+#
+# smk-battery: poll the BLE GATT Battery Level (0x2A19) of an SMK keyboard.
+#
+# Runs on the host while the keyboard is connected over BLE, so the module's own
+# battery reading can be logged without a USB cable. One line per sample:
+#
+#   2026-09-23T08:01:02 100
+#
+# Usage: tools/smk-battery [DEVICE] [-i SECONDS] [-n COUNT]
+#   DEVICE   Bluetooth MAC, or a substring of the advertised name.
+#            Default: "SMK BT5.0"
+#   -i SECS  seconds between reads (default 5)
+#   -n NUM   stop after NUM samples, 0 = run forever (default 0)
+#
+# Env: SMK_BATTERY_DEVICE, SMK_BATTERY_INTERVAL, SMK_BATTERY_COUNT
+#
+# Reads characteristic 0x2A19 over BlueZ's DBus API with busctl. That forces a
+# fresh GATT read, unlike the cached org.bluez.Battery1.Percentage property.
+set -euo pipefail
+
+device="${SMK_BATTERY_DEVICE:-SMK BT5.0}"
+interval="${SMK_BATTERY_INTERVAL:-5}"
+count="${SMK_BATTERY_COUNT:-0}"
+
+usage() {
+    sed -n '2,22p' "$0" | sed 's/^# \{0,1\}//'
+}
+
+while [[ $# -gt 0 ]]; do
+    case "$1" in
+        -i|--interval) interval="$2"; shift 2 ;;
+        -n|--count)    count="$2";    shift 2 ;;
+        -h|--help)     usage; exit 0 ;;
+        --)            shift; break ;;
+        -*)            echo "unknown option: $1" >&2; usage >&2; exit 2 ;;
+        *)             device="$1"; shift ;;
+    esac
+done
+
+now() { date '+%Y-%m-%dT%H:%M:%S'; }
+
+# MAC, or a substring of the advertised name, to an uppercase MAC.
+resolve_mac() {
+    local want="$1" mac
+    if [[ "$want" =~ ^([[:xdigit:]]{2}:){5}[[:xdigit:]]{2}$ ]]; then
+        printf '%s\n' "${want^^}"
+        return 0
+    fi
+    mac="$(bluetoothctl devices 2>/dev/null \
+        | awk -v pat="$want" 'index(tolower($0), tolower(pat)) {print $2; exit}')"
+    [[ -n "$mac" ]] || return 1
+    printf '%s\n' "${mac^^}"
+}
+
+# MAC to the object path of its Battery Level characteristic, or empty.
+find_char() {
+    local mac="$1" dev p
+    dev="$(busctl tree org.bluez 2>/dev/null \
+        | grep -oE "/org/bluez/hci[0-9]+/dev_${mac//:/_}" | head -1)"
+    [[ -n "$dev" ]] || return 1
+    for p in $(busctl tree org.bluez 2>/dev/null \
+            | grep -oE "${dev}(/[a-z0-9]+)*" | sort -u); do
+        if busctl introspect org.bluez "$p" 2>/dev/null | grep -qi '00002a19'; then
+            printf '%s\n' "$p"
+            return 0
+        fi
+    done
+    return 1
+}
+
+# Characteristic path to the battery percentage, or non-zero on a failed read.
+read_pct() {
+    local char="$1" out
+    out="$(busctl call org.bluez "$char" \
+        org.bluez.GattCharacteristic1 ReadValue a{sv} 0 2>/dev/null)" || return 1
+    # "ay 1 100"
+    [[ "$(awk '{print $2}' <<<"$out")" == "1" ]] || return 1
+    awk '{print $3}' <<<"$out"
+}
+
+mac=""
+char=""
+last_state=""
+samples=0
+
+while :; do
+    if [[ -z "$char" ]]; then
+        if [[ -z "$mac" ]]; then
+            mac="$(resolve_mac "$device")" || mac=""
+        fi
+        if [[ -z "$mac" ]]; then
+            if [[ "$last_state" != "no-device" ]]; then
+                echo "$(now) no-device '$device'" >&2
+                last_state="no-device"
+            fi
+        elif ! char="$(find_char "$mac")"; then
+            char=""
+            if [[ "$last_state" != "not-connected" ]]; then
+                echo "$(now) $mac not-connected" >&2
+                last_state="not-connected"
+            fi
+        elif [[ "$last_state" != "connected" ]]; then
+            echo "$(now) $mac connected" >&2
+            last_state="connected"
+        fi
+    fi
+
+    if [[ -n "$char" ]]; then
+        if pct="$(read_pct "$char")"; then
+            printf '%s %s\n' "$(now)" "$pct"
+            samples=$((samples + 1))
+        else
+            echo "$(now) $mac read-failed" >&2
+            char=""
+        fi
+    fi
+
+    if [[ "$count" != 0 && "$samples" -ge "$count" ]]; then
+        break
+    fi
+    sleep "$interval"
+done

@@ -10,6 +10,9 @@
 #include "delay.h"
 #include "indicators.h"
 #include "sleep.h"
+#ifdef ISP_ENABLE
+#    include "isp.h"
+#endif
 #include <stdlib.h>
 #include <stdbool.h>
 
@@ -58,6 +61,21 @@ static uint8_t osl_used;
 static uint8_t osl_row;
 static uint8_t osl_col;
 #endif
+
+// Recovery check for the boot path: true when the top-left key (R0/C0) is held
+// at power-on. It drives the column directly instead of going through the scan
+// ISR, so it works before matrix_init() and before USB, which is exactly when a
+// wedged image cannot answer the host's ISP feature report or reach Fn+B.
+bool matrix_recovery_held(void)
+{
+    user_matrix_cols_deselect_all();
+    user_matrix_col_select(0);
+    delay_us(50);                                            // let the row line settle before sampling
+    const bool held = (user_matrix_read_rows() & 0x01) == 0; // R0 is bit 0, active-low
+    user_matrix_col_deselect(0);
+    user_matrix_cols_deselect_all();
+    return held;
+}
 
 void matrix_init()
 {
@@ -331,6 +349,15 @@ void matrix_process_key(uint8_t row, uint8_t col, bool pressed)
         return;
     }
 
+#    ifdef ISP_ENABLE
+    // QK_BOOTLOADER hands over to the ISP bootloader, the same path the host's
+    // feature report takes. It is the on-keyboard recovery route when the host
+    // cannot get the board into ISP mode.
+    if (pressed && kc == QK_BOOTLOADER) {
+        isp_jump();
+    }
+#    endif
+
     osl_update(row, col, pressed);
     dispatch_keycode(kc, pressed);
 }
@@ -393,9 +420,9 @@ void matrix_scan_full(void)
     for (uint8_t col = 0; col < MATRIX_COLS; col++) {
         user_matrix_col_select(col);
 
-        delay_us(10); // let the row lines settle before sampling
+        delay_us(1); // settle (was 10us; the 2x10us x 14-col sweep blocked USB ~320us)
         const uint8_t sample1 = user_matrix_read_rows();
-        delay_us(10);
+        delay_us(1);
         const uint8_t sample2 = user_matrix_read_rows();
 
         if (sample1 == sample2) {

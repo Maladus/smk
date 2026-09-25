@@ -109,6 +109,53 @@ set config #1, error -32`); it has been removed.
 `usb_hw_init()` matches the stock USB init (`0xB144`): `USBADDR=0`, `USBIE1=0x5F`,
 `USBIE2=0x11`, `USBCON=0xC0`.
 
+### Entering ISP mode
+
+The vendor feature report (id 5, payload `05 75`) is the host route into the
+bootloader; `sinowisp` sends it before writing. The bootloader entry itself does
+not bring up the clock tree, so `isp_jump()` runs `clock_init()` first: a stopped
+PLL makes the bootloader assert its USB pull-up without answering enumeration,
+which looks like a hung keyboard (`device descriptor read/64, error -110` in
+`journalctl -k`). The stock app never stops the clock, which is why the stock
+jump works without this step.
+
+`Fn`+`B` is `QK_BOOTLOADER`: it calls the same `isp_jump()` from the key matrix,
+so a board whose host-side ISP trigger is not working can still be put back into
+the bootloader from the keyboard itself.
+
+If the board is already hung and does not enumerate at all (`lsusb` shows the
+`1a40:0801` hub but no `258a:00f8` or `0603:1020`), unplug and replug the USB-C
+cable to power-cycle the MCU. If that does not bring it back, restore the full
+image (app plus bootloader) over the ICP pins with `mise run flash-isp-full`; a
+plain `mise run flash-isp` writes only the app region and zeroes the bootloader,
+which is exactly what leaves the USB ISP path unusable.
+
+### Boot-stage marker
+
+`init()` and the top of `main()` call `indicators_boot_stage(stage)` to paint a
+static backlight marker before anything can hang. The lit rows read as a 5-bit
+stage number, row 0 = Esc = bit 0 through row 4 = Ctrl = bit 4, so the last
+stage reached is visible with no USB or console. `indicators_start()` clears it
+and hands the backlight back to the effect engine.
+
+| Stage | Rows lit (Esc, Tab, Caps, Shift, Ctrl) | Reached |
+| --- | --- | --- |
+| 1 | Esc | `user_init()` done (GPIO/PWM up) |
+| 2 | Tab | `matrix_init()` done (Vial keymap seed finished) |
+| 3 | Esc, Tab | `keyboard_init()` done |
+| 4 | Caps | `usb_init()` done (D+ asserted) |
+| 5 | Esc, Caps | `indicators_init()` done |
+| 6 | Tab, Caps | `tick_init()` done |
+| 7 | Esc, Tab, Caps | `EA = 1` (interrupts on) |
+| 8 | Shift | boot banner printed |
+| 9 | Esc, Shift | `kb_init()` done |
+| 10 | Tab, Shift | `restore_settings()` done |
+| 11 | Esc, Tab, Shift | `settings_dump()` done (debug) |
+| 12 | Caps, Shift | `usb_wait_for_enumeration()` returned |
+
+On a build without a marker the shared no-op in `src/user/indicators_boot_stage.c`
+is used instead, so the marker is RK61 Plus-only.
+
 ## Battery monitoring
 
 The SH68F90 has no ADC. The stock firmware measures the battery with a

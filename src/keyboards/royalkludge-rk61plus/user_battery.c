@@ -4,6 +4,7 @@
 #include "gpio.h"
 #include "watchdog.h"
 #include "delay.h"
+#include "debug.h"
 
 // RC battery measurement, reversed from the stock firmware's boot/wake routine
 // (0xF770, called from the 0xF000 boot entry). The SH68F90 has no ADC, so the
@@ -69,6 +70,38 @@ void user_battery_measure(void)
         level = BATTERY_LEVELS - 1;
     }
 
-    keyboard_state.battery_level = level;
-    keyboard_state.low_power     = (level <= 1) ? 1 : 0;
+    keyboard_state.battery_level_rc = level;
+    keyboard_state.battery_level    = level;
+    keyboard_state.low_power        = (level <= 1) ? 1 : 0;
 }
+
+#if DEBUG == 1
+
+// Main-loop passes between diagnostic samples. The loop runs at roughly 100 Hz
+// on this board, so 100 passes is about one second.
+#    define BATTERY_DIAG_INTERVAL_TICKS 100
+
+void user_battery_diag_task(void)
+{
+    static uint16_t ticks;
+
+    if (++ticks < BATTERY_DIAG_INTERVAL_TICKS) {
+        return;
+    }
+    ticks = 0;
+
+    // The count loop times the sense pin in wall-clock, so keep the matrix/LED
+    // interrupt out of it or a scan mid-measure inflates the count.
+    const uint8_t ea = EA;
+    EA               = 0;
+    user_battery_measure();
+    EA = ea;
+
+    dprintf("bat rc=%u rf=%u lp=%u\r\n", keyboard_state.battery_level_rc, keyboard_state.battery_level_rf, keyboard_state.low_power);
+}
+
+#else
+
+void user_battery_diag_task(void) {}
+
+#endif

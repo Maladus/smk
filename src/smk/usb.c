@@ -572,13 +572,6 @@ static uint8_t         vial_in_offset;
 static volatile bool   vial_request_pending;
 #endif
 
-#define ENUM_QUIET_MS   500
-#define ENUM_NO_HOST_MS 500
-#define ENUM_GIVE_UP_MS 4000
-
-static uint16_t enum_quiet_ticks;
-static bool     enum_seen;
-
 void usb_init()
 {
     usb_device_state     = USB_DEVICE_STATE_DEFAULT;
@@ -596,9 +589,6 @@ void usb_init()
 
     ep0_xfer_bytes_left = 0;
     ep0_xfer_src        = 0;
-
-    enum_quiet_ticks = 0;
-    enum_seen        = false;
 
     usb_hw_init();
 }
@@ -671,19 +661,9 @@ void usb_send_extra(__xdata report_extra_t *report)
 
 void usb_wait_for_enumeration(void)
 {
-    for (uint16_t ms = 0; ms < ENUM_GIVE_UP_MS; ms++) {
-        watchdog_kick();
-
-        if (enum_seen) {
-            if (enum_quiet_ticks == 0) {
-                return;
-            }
-        } else if (ms >= ENUM_NO_HOST_MS) {
-            return; // no SETUP ever arrived: nothing is driving the bus
-        }
-
-        delay_ms(1);
-    }
+    // Non-blocking: the stock firmware boots straight into its loop and services
+    // USB from the interrupt. Waiting here starves the main loop, so a host that
+    // talks to the raw-HID interface during/after enumeration gets no answer.
 }
 
 // not from the ISR: the bootloader never RETIs and reboots by jumping, so an in-service latch outlives it and kills USB.
@@ -923,11 +903,13 @@ void usb_irq_dispatch(void)
     uint8_t temp_usbif2 = USBIF2;
 
     if (temp_usbif1 != 0x00) {
+        // Clear the overflow flags unconditionally: when SOFIF is set the else
+        // branch below is skipped, and a latched OVERIF/OW would keep the vector
+        // firing and starve the main loop.
+        USBIF1 &= ~(_OVERIF | _OW);
+
         if (temp_usbif1 & _SOFIF) {
             USBIF1 &= ~_SOFIF;
-            if (enum_quiet_ticks) {
-                enum_quiet_ticks--;
-            }
             usb_suspended = 0; // a SOF means the host is driving the bus again
         } else {
             USBIF1 &= ~(_SETUPIF);      // Clear SETUPIF
@@ -938,8 +920,6 @@ void usb_irq_dispatch(void)
                 usb_init();
             } else if (temp_usbif1 & _SETUPIF) {
                 USBIF1 &= ~_SETUPIF;
-                enum_quiet_ticks = ENUM_QUIET_MS;
-                enum_seen        = true;
                 usb_setup_irq();
             } else if (temp_usbif1 & _RESMIF) { // RESMIF
                 USBIF1 &= ~_RESMIF;

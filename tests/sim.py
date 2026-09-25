@@ -180,9 +180,11 @@ class Sim:
     # SH68F90 SFR addresses / bits (see src/sino51lib/sh68f90/sh68f90.h)
     IE, IEN1, USBADDR, USBIF1, USBIF2, EP0CON = 0xA8, 0xA9, 0x96, 0x92, 0x93, 0x97
     SP_SFR = 0x81
+    RSTSTAT = 0xB1
     EP0_OUT_BUF = 0x1100
     EA, EUSB, SETUPIF, OEP0IF = 0x80, 0x01, 0x10, 0x10
     USB_VECTOR = 0x3B
+    WDOF = 0x80  # RSTSTAT.WDOF: the last reset was the watchdog
     ISP_BOOTLOADER = 0xFF00  # isp_jump() does: clr EA; B=0xa5; A=0x5a; ljmp 0xff00
     ISP_MAGIC_ACC, ISP_MAGIC_B = 0x5A, 0xA5
     SLED_END = 0x900E  # break address at the end of the 16-byte NOP sled
@@ -210,6 +212,7 @@ class Sim:
         self.USB_DEVICE_STATE = s["usb_device_state"]
         self.RECEIVED_USB_ADDR = s["received_usb_addr"]
         self.USB_TASK = s["usb_task"]
+        self.INIT = s["init"]
         # POST_INIT can't be a single symbol -- it's the address after the LCALL
         # _init inside main(). find_post_init() walks main()'s prologue to find it.
         self.POST_INIT = find_post_init(s, self.firmware)
@@ -341,6 +344,24 @@ class Sim:
             f"dump xram 0x{self.LED_STATE:x} 0x{self.LED_STATE:x}",
         ]
         return self.dumped_byte(self.run(cmds))
+
+    def watchdog_reset_boot(self, wdof=True):
+        """Break on init()'s first instruction, set RSTSTAT.WDOF there (before
+        reset_init() reads it), then run and report where the CPU lands. With
+        WDOF set, init() must hand back to the ISP bootloader instead of booting
+        the wedged image."""
+        flag = self.WDOF if wdof else 0x00
+        cmds = [
+            "reset",
+            f"break 0x{self.INIT:x}",
+            "run",
+            "delete",
+            f"set mem sfr 0x{self.RSTSTAT:x} 0x{flag:02x}",
+            f"break 0x{self.ISP_BOOTLOADER:x}",
+            "run",
+            "info registers",
+        ]
+        return self.run(cmds)
 
     def _boot_to_post_init(self):
         """Boot from reset through the real init path and stop right after init()

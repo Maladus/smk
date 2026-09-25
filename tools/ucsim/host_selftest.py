@@ -99,7 +99,9 @@ def submit(sock: socket.socket, seq: int, ep: int, direction: int, setup: bytes,
     h = recvn(sock, 48)
     _, _, _, _, _ = struct.unpack(">IIIII", h[:20])
     status, actual, _, _, _ = struct.unpack(">iiiii", h[20:40])
-    data = recvn(sock, actual) if actual > 0 else b""
+    # A control-OUT transfer carries its data in the SUBMIT, so the RET_SUBMIT
+    # payload is empty even though actual_length reports the data-stage size.
+    data = recvn(sock, actual) if (actual > 0 and direction != USBIP_DIR_OUT) else b""
     return status, data
 
 

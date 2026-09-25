@@ -385,19 +385,33 @@ endforeach
 alias_target('examples', example_hexes)
 
 # Simulator-based firmware tests, run in the patched uCsim simulator (flake
-# package ucsim-sh68f90). Discovers every tests/test_*.py so new test files are
-# picked up automatically. Only registered when both the simulator and python3
-# are available; the suite itself skips if no firmware .hex has been built yet.
+# package ucsim-sh68f90). Discovers every tests/test_*.py and registers each as
+# its own meson test, so `meson test` runs them in parallel across cores; one
+# unittest-discover process is serial and the suite now runs past the timeout on
+# slower machines. The harness gives every ucsim session its own TCP port, so
+# the files are safe to run concurrently. Only registered when both the
+# simulator and python3 are available; a file skips if its firmware is not built.
 sim = find_program('ucsim-sh68f90', required : false)
 py = find_program('python3', required : false)
 if sim.found() and py.found()
-    test(
-        'sim-tests',
+    tests_dir = join_paths(dir_base, 'tests')
+    test_files = run_command(
         py,
-        args : ['-m', 'unittest', 'discover', '-s', join_paths(dir_base, 'tests'), '-t', join_paths(dir_base, 'tests')],
-        env : {'SMK_UCSIM' : sim.full_path()},
-        # full suite is ~30s locally and most tests boot through real init;
-        # bump well above the meson 30s default so slower CI runners pass.
-        timeout : 300,
-    )
+        '-c',
+        'import glob, os, sys; print("\\n".join(sorted(os.path.basename(p) for p in glob.glob(os.path.join(sys.argv[1], "test_*.py")))))',
+        tests_dir,
+        check : true,
+    ).stdout().strip().split('\n')
+    foreach t : test_files
+        test(
+            'sim-' + t.replace('.py', ''),
+            py,
+            args : ['-m', 'unittest', t.replace('.py', '')],
+            workdir : tests_dir,
+            env : {'SMK_UCSIM' : sim.full_path()},
+            suite : 'sim',
+            # Per-file timeout; the longest file (test_vial) is ~2.5 min here.
+            timeout : 300,
+        )
+    endforeach
 endif

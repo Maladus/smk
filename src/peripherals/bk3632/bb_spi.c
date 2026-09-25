@@ -2,6 +2,7 @@
 #include "kbdef.h"
 #include "gpio.h"
 #include "delay.h"
+#include "watchdog.h"
 
 #define _nop_() __asm nop __endasm
 
@@ -44,11 +45,15 @@ static void bb_spi_burst(uint8_t *data, int len, bool lock)
         __critical
         {
             for (int i = 0; i < len; i++) {
+                // The critical section runs with interrupts off; keep the
+                // watchdog fed or a slow RF transaction resets the chip.
+                watchdog_kick();
                 data[i] = bb_spi_xfer_byte(data[i]);
             }
         }
     } else {
         for (int i = 0; i < len; i++) {
+            watchdog_kick();
             data[i] = bb_spi_xfer_byte(data[i]);
         }
     }

@@ -1,5 +1,6 @@
 #include "flash.h"
 #include "sfr.h"
+#include "watchdog.h"
 #include <stdint.h>
 
 #define SSP_KEY_2 0x05u
@@ -50,6 +51,13 @@ static void ssp_run(uint8_t flashcon, uint16_t addr, uint8_t op, uint8_t data)
 {
     __critical
     {
+        // The stock kicks the watchdog before every program/erase (`CLR A;
+        // MOV 0xb1,A` at 0xA758 and 0xA9E9). A sector program is hundreds of
+        // these back to back, so without the kick a long write -- the Vial
+        // keymap seed at boot -- outlives the WDT period and resets the chip
+        // mid-boot, which looks like a hung board.
+        watchdog_kick();
+
         FLASHCON  = flashcon;
         XPAGE     = (uint8_t)(addr >> 8);
         IB_OFFSET = (uint8_t)(addr & 0xFFu);

@@ -186,7 +186,8 @@ bool rf_update_keyboard_state(keyboard_state_t *keyboard)
         rf_wake_nudge();
     }
 
-    keyboard->battery_level = status_bytes[0] & 0x07;
+    keyboard->battery_level    = status_bytes[0] & 0x07;
+    keyboard->battery_level_rf = status_bytes[0] & 0x07;
 
     keyboard->led_state = status_bytes[1] & ((1 << 0) | (1 << 1) | (1 << 2));
     keyboard->connected = (status_bytes[1] >> 3) & 1;

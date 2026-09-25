@@ -26,10 +26,15 @@
 #ifdef RF_ENABLED
 #    include "rf_controller.h"
 #endif
+#ifdef ISP_ENABLE
+#    include "isp.h"
+#endif
+
 void init(void)
 {
     reset_init();
     ldo_init();
+
     clock_init();
     peripherals_init();
 #ifdef DEBUG_SINK_UART
@@ -38,11 +43,21 @@ void init(void)
 
     user_init();
 
+#ifdef ISP_ENABLE
+    // Recovery: watchdog reset or Esc held at power-on hands back to the ISP
+    // bootloader, so a wedged diagnostic image can still be reflashed.
+    if (reset_was_watchdog()) {
+        isp_jump();
+    }
+    if (matrix_recovery_held()) {
+        isp_jump();
+    }
+#endif
+
     matrix_init();
     keyboard_init();
     usb_init();
     indicators_init();
-
     tick_init();
 
     EA = 1;
@@ -89,10 +104,6 @@ void main(void)
     sleep_init(); // needs the board's GPIO and RF up
 
 #ifdef RF_ENABLED
-    // Bring the radio up from the main loop, like the stock firmware: USB is
-    // already connected and serviced, so the host's enumeration never waits on
-    // the RF init. The transport falls back to USB until a link is real, so
-    // nothing is lost by deferring this.
     bool rf_up = false;
 #endif
 
@@ -100,11 +111,6 @@ void main(void)
         watchdog_kick();
 
 #ifdef RF_ENABLED
-        // Bring the radio up from the main loop, like the stock firmware: USB is
-        // already connected and serviced, so the host's enumeration never waits
-        // on the RF init. The radio stays up in wired/USB mode too, so Fn+Q/W/E
-        // can connect a BLE host while the cable is plugged in and toggle back
-        // to USB (stock behaviour).
         if (!rf_up) {
             rf_up = true;
             rf_init();
@@ -118,9 +124,7 @@ void main(void)
 #ifdef VIAL_ENABLE
         tapping_task();
 #endif
-
         indicators_render();
-
         usb_task();
 #ifdef VIAL_ENABLE
         vial_task();

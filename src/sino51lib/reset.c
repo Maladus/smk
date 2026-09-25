@@ -7,3 +7,8 @@ void reset_init(void)
 {
     reset_status = RSTSTAT;
 }
+
+bool reset_was_watchdog(void)
+{
+    return (reset_status & _WDOF) != 0;
+}

@@ -98,15 +98,22 @@ meson compile -C build "$@"
 '''
 
 [tasks.usim]
-description = "Build the reference firmware and run the uCsim simulator test suite"
+description = "Build the test firmwares and run the uCsim simulator test suite (parallel)"
 depends = ["setup", "setup-ucsim"]
 run = '''
 #!/usr/bin/env bash
 set -euo pipefail
 # Reconfigure so Meson picks up ucsim-sh68f90 now that it is on PATH.
 meson setup --reconfigure build > /dev/null
-meson compile -C build nuphy-air60_default_smk.hex
-meson test -C build sim-tests --print-errorlogs
+# One target per test group: nuphy is the reference, rk61plus default and vial
+# back the RK61 Plus suites. Missing firmware makes a test file skip.
+meson compile -C build \
+  nuphy-air60_default_smk.hex \
+  royalkludge-rk61plus_default_smk.hex \
+  royalkludge-rk61plus_vial_smk.hex > /dev/null
+# Each tests/test_*.py is its own meson test, so meson runs them in parallel
+# (default: one process per core).
+meson test -C build --suite sim --print-errorlogs
 '''
 
 # ICP flashing over the sinodude-serial Arduino programmer. Needs `sinodude` on
@@ -116,14 +123,18 @@ meson test -C build sim-tests --print-errorlogs
 # port with SINODUDE_PORT.
 
 [tasks.flash-isp]
-description = "Write the RK61 Plus firmware over the sinodude-serial ICP programmer"
+description = "Write the RK61 Plus app region over the sinodude-serial ICP programmer"
 depends = ["setup"]
 run = '''
 #!/usr/bin/env bash
 set -euo pipefail
 meson compile -C build royalkludge-rk61plus_default_smk.hex > /dev/null
+# Bounded range: a bare `write` mass-erases the whole flash, which zeroes the
+# bootloader at 0xF000 and leaves the USB ISP path unusable. Stop at 0xF000 so
+# the stock bootloader survives; use flash-isp-full to restore it.
 sinodude write --flash build/royalkludge-rk61plus_default_smk.hex \
-  -c sinodude-serial -p "${SINODUDE_PART:-sh68f90a}" --port "${SINODUDE_PORT:-/dev/ttyUSB0}"
+  -c sinodude-serial -p "${SINODUDE_PART:-sh68f90a}" --port "${SINODUDE_PORT:-/dev/ttyUSB0}" \
+  --start_addr 0x0 --end_addr 0xF000
 '''
 
 [tasks.full-image]

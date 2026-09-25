@@ -5,10 +5,12 @@
 typedef struct {
     uint8_t led_state;
     uint8_t rf_link;
-    uint8_t battery_level; // 0..7
-    uint8_t low_power;     // 1 when the battery is critically low
-    uint8_t connected;     // 1 when the active RF link has a host paired+connected
-    uint8_t paired;        // 1 when the active RF link has a paired host
+    uint8_t battery_level;    // 0..7, effective value for the indicators
+    uint8_t low_power;        // 1 when the battery is critically low
+    uint8_t connected;        // 1 when the active RF link has a host paired+connected
+    uint8_t paired;           // 1 when the active RF link has a paired host
+    uint8_t battery_level_rc; // 0..7, last RC-timing measurement (diagnostic)
+    uint8_t battery_level_rf; // 0..7, last RF-module status (diagnostic)
 } keyboard_state_t;
 
 typedef struct {
