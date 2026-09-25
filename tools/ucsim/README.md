@@ -67,6 +67,24 @@ tools/ucsim/host_selftest.py build/royalkludge-rk61plus_vial_smk.hex
 This is also the regression check for the simulator and bridge changes: it
 fails if enumeration, control transfers or the pending interrupt-IN path break.
 
+## Kernel end-to-end test
+
+`kernel_test.py` is the real-kernel counterpart: it attaches the simulated
+device to this machine's USB stack and checks what the simulator cannot -- real
+enumeration, a key typed through the emulated matrix arriving as an input event,
+and a Vial request round-tripping through the kernel's raw-HID interface.
+
+```
+tools/ucsim/kernel_test.py [firmware.hex]   # defaults to the vial image
+```
+
+It skips (exit 2) when `vhci-hcd`, `usbip` or Docker are missing. Root for the
+root-only vhci sysfs write comes from a root container sharing this kernel, so
+no `--privileged` and no sudo are needed. The container reads need the input
+(`c 13:* rmw`) device cgroup rule; the script sets that itself.
+
+This is the reproducible "attach and exercise it" check for Step 0.
+
 ## Environment
 
 - `SMK_UCSIM` — patched simulator binary (default

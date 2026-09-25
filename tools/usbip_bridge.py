@@ -489,10 +489,12 @@ class UsbIpBridge:
                     urb = PendingUrb(seqnum, devid, ep, direction, max(tlen, 0))
                     self._handle_urb(sock, urb, payload)
                 elif code == USBIP_CMD_UNLINK:
-                    if len(buf) < 8 + 4:
+                    # UNLINK is also a full 48-byte header; consuming only the
+                    # seqnum desynced the stream and crashed on the leftover bytes.
+                    if len(buf) < USBIP_HEADER_LEN:
                         break
                     (target,) = struct.unpack(">I", buf[8:12])
-                    buf = buf[12:]
+                    buf = buf[USBIP_HEADER_LEN:]
                     for urb in list(self.pending):
                         if urb.seqnum == target:
                             self.pending.remove(urb)
