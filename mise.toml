@@ -163,3 +163,16 @@ meson compile -C build royalkludge-rk61plus_default_smk.hex > /dev/null
 sinowisp write --platform sh68f90 --vendor_id 0x258a --product_id 0x00f8 --force \
   build/royalkludge-rk61plus_default_smk.hex
 '''
+
+# Same transport as flash-usb, but the Vial layout (raw-HID interface, dynamic
+# keymap store). Use this to put a board into Vial mode.
+[tasks.flash-usb-vial]
+description = "Write the RK61 Plus Vial firmware over the USB ISP bootloader (sinowisp)"
+depends = ["setup"]
+run = '''
+#!/usr/bin/env bash
+set -euo pipefail
+meson compile -C build royalkludge-rk61plus_vial_smk.hex > /dev/null
+sinowisp write --platform sh68f90 --vendor_id 0x258a --product_id 0x00f8 --force \
+  build/royalkludge-rk61plus_vial_smk.hex
+'''
