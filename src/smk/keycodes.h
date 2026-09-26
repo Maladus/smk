@@ -1430,6 +1430,10 @@ enum keycode_aliases {
 #define OSM(mod) (QK_ONE_SHOT_MOD | ((mod)&0x1F))
 #define QK_ONE_SHOT_MOD_GET_MODS(kc) ((kc)&0x1F)
 
+// Tap dance: emits a different keycode per tap count.
+#define TD(i) (QK_TAP_DANCE | ((i)&0xFF))
+#define QK_TAP_DANCE_GET_INDEX(kc) ((kc)&0xFF)
+
 // Layer mod: hold for the layer and the modifier together. Layer is 4 bits.
 #define LM(layer, mod) (QK_LAYER_MOD | (((layer)&0xF) << 8) | ((mod)&0x1F))
 #define QK_LAYER_MOD_GET_LAYER(kc) (((kc) >> 8) & 0xF)

@@ -46,16 +46,47 @@ bool     dynamic_keymap_hold_on_other_key_press(void);
 void     dynamic_keymap_set_hold_on_other_key_press(bool on);
 void     dynamic_keymap_reset_settings(void);
 
-// Dynamic-entry store: Vial combos (input keycodes + output). The table lives
-// in its own A/B flash sector pair (VIAL_ENTRY_ADDR), separate from the keymap.
+// Dynamic-entry store: Vial combos, tap dances and key overrides. The tables
+// share one A/B flash sector pair (VIAL_ENTRY_ADDR), separate from the keymap.
 // get/set return 0 on success and non-zero on a bad index or an unready store.
 typedef struct {
     uint16_t input[4];
     uint16_t output;
 } vial_combo_entry_t;
 
+typedef struct {
+    uint16_t on_tap;
+    uint16_t on_hold;
+    uint16_t on_double_tap;
+    uint16_t on_tap_hold;
+    uint16_t custom_tapping_term;
+} vial_tap_dance_entry_t;
+
+typedef struct {
+    uint16_t trigger;
+    uint16_t replacement;
+    uint16_t layers;
+    uint8_t  trigger_mods;
+    uint8_t  negative_mod_mask;
+    uint8_t  suppressed_mods;
+    uint8_t  options;
+} vial_key_override_entry_t;
+
+// Key override option bits (match vial-qmk).
+enum vial_key_override_option {
+    vial_ko_enabled = (1 << 7),
+};
+
 uint8_t dynamic_keymap_combo_count(void);
 int     dynamic_keymap_get_combo(uint8_t index, vial_combo_entry_t *entry);
 int     dynamic_keymap_set_combo(uint8_t index, const vial_combo_entry_t *entry);
+
+uint8_t dynamic_keymap_tap_dance_count(void);
+int     dynamic_keymap_get_tap_dance(uint8_t index, vial_tap_dance_entry_t *entry);
+int     dynamic_keymap_set_tap_dance(uint8_t index, const vial_tap_dance_entry_t *entry);
+
+uint8_t dynamic_keymap_key_override_count(void);
+int     dynamic_keymap_get_key_override(uint8_t index, vial_key_override_entry_t *entry);
+int     dynamic_keymap_set_key_override(uint8_t index, const vial_key_override_entry_t *entry);
 
 #endif // VIAL_ENABLE

@@ -33,6 +33,8 @@ keyboards += {
                     'vial_keymap_sectors' : 2,
                     'vial_entry_sectors' : 2,
                     'vial_combo_entries' : 8,
+                    'vial_tap_dance_entries' : 8,
+                    'vial_key_override_entries' : 8,
                 },
             },
         },

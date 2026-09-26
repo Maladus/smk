@@ -15,31 +15,13 @@ work with effort and implementation notes.
 - One-shot mods (OSM): modifier applies to the next key only.
 - Vial dynamic-entry command (0xFE + 0x0D) and the combo engine. Combos are
   editable in the Vial GUI and persist in their own A/B flash sector pair.
+- Tap dance (TD) and key overrides, sharing the dynamic-entry store with combos.
 
 ## Missing features
 
 Ordered by value per effort.
 
-### 1. Tap dance — medium (dynamic-entry plumbing done)
-
-One key, N taps within a term, different keycode per tap count.
-
-- Add `VIAL_TAP_DANCE_ENTRIES`, a tap-dance entry store (10 bytes each:
-  on_tap / on_hold / on_double_tap / on_tap_hold / custom_tapping_term) and
-  the tap counter + term timer.
-- Advertise the count in the `get_number_of_entries` reply and handle
-  sub-ops 0x01/0x02.
-- The flash store and protocol scaffolding from the combo work are reusable.
-
-### 2. Key overrides — medium (dynamic-entry plumbing done)
-
-Rewrite a key based on current mods, e.g. Shift+Backspace -> Delete.
-
-- Add `VIAL_KEY_OVERRIDE_ENTRIES`, a 10-byte entry store (trigger, replacement,
-  layers, mod masks, options) and the override engine.
-- Advertise the count and handle sub-ops 0x05/0x06.
-
-### 3. Macros — medium-large
+### 1. Macros — medium-large
 
 Record and replay a key sequence.
 
@@ -49,7 +31,7 @@ Record and replay a key sequence.
 - Macro player: `QK_MACRO` dispatch walks the buffer emitting down/up/delay,
   with a timing hook in the main loop.
 
-### 4. NKRO — small-medium
+### 2. NKRO — small-medium
 
 - `src/smk/report.h`: USB bitfield 13 bytes (15-byte report, fits EP1) vs the
   RF 20 bytes for the dongle. 13 bytes covers keys 0x00-0x67, everything except
@@ -58,7 +40,7 @@ Record and replay a key sequence.
   `usb_send_nkro` sends a numbered NKRO report on EP1 like the 6KRO report.
 - `meson.build`: `nkro: true`.
 
-### 5. More layers (8) — medium
+### 3. More layers (8) — medium
 
 - `meson.build` (rk61plus): `vial_layers: 8`, `vial_keymap_sectors: 4`.
 - `src/smk/dynamic_keymap.c`: the store assumes the keymap fits one 512-byte
@@ -74,7 +56,7 @@ Keymap sizes: 16 + layers x 61 x 2 bytes. 4 layers = 504 (1 sector), 5-8 =
 626-992 (2 sectors per copy), 9-12 = 3 sectors, 13-16 = 4 sectors. With A/B
 that doubles the sector count.
 
-### 6. Lighting — medium (VIA GUI, not Vial GUI)
+### 4. Lighting — medium (VIA GUI, not Vial GUI)
 
 - `src/smk/vial.c`: VIA 0x07/0x08/0x09 set/get/save.
 - Value-ID table mapped to effect/brightness/speed, plus a user color slot in
@@ -102,12 +84,19 @@ that doubles the sector count.
 | Sub-op | Meaning | Request | Reply |
 | --- | --- | --- | --- |
 | 0x00 | get number of entries | — | out[0..3] = tap dance / combo / key override / alt repeat counts |
+| 0x01 | tap dance get | index at in[3] | out[0] = status, out[1..10] = 10-byte entry |
+| 0x02 | tap dance set | index at in[3], entry at in[4..13] | out[0] = status |
 | 0x03 | combo get | index at in[3] | out[0] = status, out[1..10] = 10-byte entry |
 | 0x04 | combo set | index at in[3], entry at in[4..13] | out[0] = status |
+| 0x05 | key override get | index at in[3] | out[0] = status, out[1..10] = 10-byte entry |
+| 0x06 | key override set | index at in[3], entry at in[4..13] | out[0] = status |
 
-A combo entry is `input[4]` keycodes followed by `output` (all big-endian),
-matching `vial_combo_entry_t`. The count comes from the protocol, not the
-definition JSON, so no `vial.json` change is needed.
+A combo entry is `input[4]` keycodes followed by `output` (all big-endian); a
+tap-dance entry is `on_tap, on_hold, on_double_tap, on_tap_hold,
+custom_tapping_term`; a key-override entry is `trigger, replacement, layers`
+(16-bit) followed by `trigger_mods, negative_mod_mask, suppressed_mods,
+options` (8-bit). The counts come from the protocol, not the definition JSON,
+so no `vial.json` change is needed.
 
 ## Phased plan
 
@@ -129,11 +118,13 @@ entry store in `dynamic_keymap.c`, and the combo engine in `combo.c`.
 Milestone: combos editable in Vial GUI; J+K+L -> Enter works. Covered by
 `tests/test_vial.py::TestVialCombos`.
 
-### Phase 3: Tap dance + key overrides — medium
+### Phase 3: Tap dance + key overrides — DONE
 
-Ride the phase 2 plumbing; add the two engines.
+Extend the dynamic-entry store with tap-dance and key-override tables, add the
+two engines and the remaining sub-ops (0x01/0x02, 0x05/0x06).
 
-Milestone: tap dance and key overrides editable in Vial GUI.
+Milestone: tap dance and key overrides editable in Vial GUI. Covered by
+`tests/test_vial.py::TestVialTapDance` and `::TestVialKeyOverride`.
 
 ### Phase 4: Macros — medium-large
 

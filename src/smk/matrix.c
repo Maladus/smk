@@ -19,6 +19,8 @@
 #ifdef VIAL_ENABLE
 #    include "combo.h"
 #    include "dynamic_keymap.h"
+#    include "key_override.h"
+#    include "tap_dance.h"
 #    include "tapping.h"
 #endif
 
@@ -106,6 +108,8 @@ void matrix_init()
     }
     dynamic_keymap_init();
     combo_init();
+    tap_dance_init();
+    key_override_init();
 #endif
 }
 
@@ -411,6 +415,11 @@ void matrix_process_key(uint8_t row, uint8_t col, bool pressed)
 
     osl_update(row, col, pressed);
     osm_update(row, col, pressed);
+
+    if (key_override_process_record(kc, layer, pressed)) {
+        return;
+    }
+
     dispatch_keycode(kc, pressed);
 }
 
@@ -434,6 +443,10 @@ static void process_key_state(uint8_t row, uint8_t col, bool pressed)
 #ifdef VIAL_ENABLE
     const uint8_t  layer = pressed ? resolve_layer(row, col) : press_layer_get(row, col);
     const uint16_t kc    = KEYMAP_GET(layer, row, col);
+
+    if (tap_dance_process_record(row, col, kc, pressed)) {
+        return;
+    }
 
     if (combo_process_record(row, col, kc, pressed)) {
         return;

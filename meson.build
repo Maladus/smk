@@ -154,15 +154,18 @@ foreach keyboard, board : keyboards
                 vial_keymap_sectors = options.get('vial_keymap_sectors', 2)
                 vial_entry_sectors = options.get('vial_entry_sectors', 0)
                 vial_combo_entries = options.get('vial_combo_entries', 0)
+                vial_tap_dance_entries = options.get('vial_tap_dance_entries', 0)
+                vial_key_override_entries = options.get('vial_key_override_entries', 0)
                 vial_layers = options.get('vial_layers', 4)
                 if vial_layers < 1 or vial_layers > 16
                     error(
                         'vial_layers for layout @0@ of keyboard @1@ must be between 1 and 16, got @2@'.format(layout, keyboard, vial_layers),
                     )
                 endif
-                if vial_combo_entries > 0 and vial_entry_sectors < 2
+                vial_entry_total = vial_combo_entries + vial_tap_dance_entries + vial_key_override_entries
+                if vial_entry_total > 0 and vial_entry_sectors < 2
                     error(
-                        'vial_combo_entries for layout @0@ of keyboard @1@ needs at least 2 vial_entry_sectors (A/B), got @2@'.format(layout, keyboard, vial_entry_sectors),
+                        'vial dynamic entries for layout @0@ of keyboard @1@ need at least 2 vial_entry_sectors (A/B), got @2@'.format(layout, keyboard, vial_entry_sectors),
                     )
                 endif
                 # The dynamic-entry store sits between the keymap store and the
@@ -175,6 +178,8 @@ foreach keyboard, board : keyboards
                     '-DVIAL_KEYMAP_ADDR=@0@u'.format(vial_keymap_addr),
                     '-DVIAL_LAYERS=@0@'.format(vial_layers),
                     '-DVIAL_COMBO_ENTRIES=@0@'.format(vial_combo_entries),
+                    '-DVIAL_TAP_DANCE_ENTRIES=@0@'.format(vial_tap_dance_entries),
+                    '-DVIAL_KEY_OVERRIDE_ENTRIES=@0@'.format(vial_key_override_entries),
                 ]
                 if vial_entry_sectors > 0
                     platform_cc_args += ['-DVIAL_ENTRY_ADDR=@0@u'.format(vial_entry_addr)]

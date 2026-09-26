@@ -211,37 +211,47 @@ static void seed_defaults(void)
     store_ready = true;
 }
 
-// --- dynamic-entry store (Vial combos) ------------------------------------
+// --- dynamic-entry store (Vial combos, tap dance, key overrides) ----------
 //
-// A separate A/B flash sector pair below the keymap store holds the combo
-// table: a small header (magic, version, count, sequence, checksum) followed by
-// VIAL_COMBO_ENTRIES entries of 10 bytes each (four input keycodes + output).
+// A separate A/B flash sector pair below the keymap store holds the dynamic
+// entry tables: a small header (magic, version, counts, sequence, checksum)
+// followed by the combo, tap-dance and key-override entries, 10 bytes each.
 // Writes stage a new copy into the spare sector and switch to it, exactly like
 // the keymap store.
-#    if VIAL_COMBO_ENTRIES > 0
+#    if (VIAL_COMBO_ENTRIES + VIAL_TAP_DANCE_ENTRIES + VIAL_KEY_OVERRIDE_ENTRIES) > 0
 #        ifndef VIAL_ENTRY_ADDR
-#            error "vial combos need VIAL_ENTRY_ADDR (set vial_entry_sectors in meson)"
+#            error "vial dynamic entries need VIAL_ENTRY_ADDR (set vial_entry_sectors in meson)"
 #        endif
 
-#        define VIAL_ENTRY_MAGIC0      0x45u // 'E'
-#        define VIAL_ENTRY_MAGIC1      0x4Eu // 'N'
-#        define VIAL_ENTRY_VERSION     1u
-#        define VIAL_ENTRY_HEADER_SIZE 16u
-#        define VIAL_COMBO_ENTRY_SIZE  10u
-#        define VIAL_ENTRY_PAYLOAD     ((uint16_t)VIAL_COMBO_ENTRIES * VIAL_COMBO_ENTRY_SIZE)
-#        define VIAL_ENTRY_TOTAL       (VIAL_ENTRY_HEADER_SIZE + VIAL_ENTRY_PAYLOAD)
+#        define VIAL_ENTRY_MAGIC0            0x45u // 'E'
+#        define VIAL_ENTRY_MAGIC1            0x4Eu // 'N'
+#        define VIAL_ENTRY_VERSION           1u
+#        define VIAL_ENTRY_HEADER_SIZE       16u
+#        define VIAL_COMBO_ENTRY_SIZE        10u
+#        define VIAL_TAP_DANCE_ENTRY_SIZE    10u
+#        define VIAL_KEY_OVERRIDE_ENTRY_SIZE 10u
+#        define VIAL_ENTRY_PAYLOAD           ((uint16_t)VIAL_COMBO_ENTRIES * VIAL_COMBO_ENTRY_SIZE + (uint16_t)VIAL_TAP_DANCE_ENTRIES * VIAL_TAP_DANCE_ENTRY_SIZE + (uint16_t)VIAL_KEY_OVERRIDE_ENTRIES * VIAL_KEY_OVERRIDE_ENTRY_SIZE)
+#        define VIAL_ENTRY_TOTAL             (VIAL_ENTRY_HEADER_SIZE + VIAL_ENTRY_PAYLOAD)
 
-#        define EN_MAGIC0   0u
-#        define EN_MAGIC1   1u
-#        define EN_VERSION  2u
-#        define EN_COUNT    3u
-#        define EN_SEQ      4u
-#        define EN_CKSUM_LO 5u
-#        define EN_CKSUM_HI 6u
-#        define EN_PAYLOAD  VIAL_ENTRY_HEADER_SIZE
+#        define EN_MAGIC0      0u
+#        define EN_MAGIC1      1u
+#        define EN_VERSION     2u
+#        define EN_COMBO_COUNT 3u
+#        define EN_TD_COUNT    4u
+#        define EN_KO_COUNT    5u
+#        define EN_SEQ         6u
+#        define EN_CKSUM_LO    7u
+#        define EN_CKSUM_HI    8u
+#        define EN_PAYLOAD     VIAL_ENTRY_HEADER_SIZE
+
+#        define EN_COMBO_OFF EN_PAYLOAD
+#        define EN_TD_OFF    (EN_COMBO_OFF + VIAL_COMBO_ENTRIES * VIAL_COMBO_ENTRY_SIZE)
+#        define EN_KO_OFF    (EN_TD_OFF + VIAL_TAP_DANCE_ENTRIES * VIAL_TAP_DANCE_ENTRY_SIZE)
 
 _Static_assert(VIAL_ENTRY_TOTAL <= VIAL_KEYMAP_SECTOR_SIZE, "vial entry store does not fit one flash sector");
 _Static_assert(VIAL_COMBO_ENTRY_SIZE == sizeof(vial_combo_entry_t), "vial combo entry size must match the wire format");
+_Static_assert(VIAL_TAP_DANCE_ENTRY_SIZE == sizeof(vial_tap_dance_entry_t), "vial tap dance entry size must match the wire format");
+_Static_assert(VIAL_KEY_OVERRIDE_ENTRY_SIZE == sizeof(vial_key_override_entry_t), "vial key override entry size must match the wire format");
 
 static __xdata uint8_t entry_sector[VIAL_ENTRY_TOTAL];
 static uint8_t         entry_active_sector;
@@ -267,7 +277,10 @@ static bool entry_valid(const __xdata uint8_t *buf)
     if (buf[EN_MAGIC0] != VIAL_ENTRY_MAGIC0 || buf[EN_MAGIC1] != VIAL_ENTRY_MAGIC1) {
         return false;
     }
-    if (buf[EN_VERSION] != VIAL_ENTRY_VERSION || buf[EN_COUNT] != VIAL_COMBO_ENTRIES) {
+    if (buf[EN_VERSION] != VIAL_ENTRY_VERSION) {
+        return false;
+    }
+    if (buf[EN_COMBO_COUNT] != VIAL_COMBO_ENTRIES || buf[EN_TD_COUNT] != VIAL_TAP_DANCE_ENTRIES || buf[EN_KO_COUNT] != VIAL_KEY_OVERRIDE_ENTRIES) {
         return false;
     }
     const uint16_t stored = (uint16_t)(buf[EN_CKSUM_LO] | ((uint16_t)buf[EN_CKSUM_HI] << 8));
@@ -298,12 +311,14 @@ static void entry_seed_defaults(void)
     for (uint16_t i = 0; i < VIAL_ENTRY_TOTAL; i++) {
         entry_sector[i] = 0;
     }
-    entry_sector[EN_MAGIC0]  = VIAL_ENTRY_MAGIC0;
-    entry_sector[EN_MAGIC1]  = VIAL_ENTRY_MAGIC1;
-    entry_sector[EN_VERSION] = VIAL_ENTRY_VERSION;
-    entry_sector[EN_COUNT]   = VIAL_COMBO_ENTRIES;
-    entry_sector[EN_SEQ]     = 0;
-    entry_active_sector      = 1; // entry_commit() writes the spare, so sector 0
+    entry_sector[EN_MAGIC0]      = VIAL_ENTRY_MAGIC0;
+    entry_sector[EN_MAGIC1]      = VIAL_ENTRY_MAGIC1;
+    entry_sector[EN_VERSION]     = VIAL_ENTRY_VERSION;
+    entry_sector[EN_COMBO_COUNT] = VIAL_COMBO_ENTRIES;
+    entry_sector[EN_TD_COUNT]    = VIAL_TAP_DANCE_ENTRIES;
+    entry_sector[EN_KO_COUNT]    = VIAL_KEY_OVERRIDE_ENTRIES;
+    entry_sector[EN_SEQ]         = 0;
+    entry_active_sector          = 1; // entry_commit() writes the spare, so sector 0
     entry_commit();
     entry_ready = true;
 }
@@ -340,24 +355,79 @@ static void dynamic_entry_init(void)
     entry_ready = true;
 }
 
+// All entries are big-endian 16-bit fields (plus a trailing byte group for key
+// overrides); these helpers keep the section readers/writers small.
+static uint16_t entry_read16(uint16_t off)
+{
+    return (uint16_t)(((uint16_t)entry_sector[off] << 8) | entry_sector[off + 1]);
+}
+
+static void entry_write16(uint16_t off, uint16_t v)
+{
+    entry_sector[off]     = (uint8_t)(v >> 8);
+    entry_sector[off + 1] = (uint8_t)(v & 0xFF);
+}
+
 static void combo_read(uint8_t index, vial_combo_entry_t *entry)
 {
-    const uint16_t off = (uint16_t)(EN_PAYLOAD + (uint16_t)index * VIAL_COMBO_ENTRY_SIZE);
+    const uint16_t off = (uint16_t)(EN_COMBO_OFF + (uint16_t)index * VIAL_COMBO_ENTRY_SIZE);
     for (uint8_t i = 0; i < 4; i++) {
-        entry->input[i] = (uint16_t)(((uint16_t)entry_sector[off + i * 2] << 8) | entry_sector[off + i * 2 + 1]);
+        entry->input[i] = entry_read16((uint16_t)(off + i * 2));
     }
-    entry->output = (uint16_t)(((uint16_t)entry_sector[off + 8] << 8) | entry_sector[off + 9]);
+    entry->output = entry_read16((uint16_t)(off + 8));
 }
 
 static void combo_write(uint8_t index, const vial_combo_entry_t *entry)
 {
-    const uint16_t off = (uint16_t)(EN_PAYLOAD + (uint16_t)index * VIAL_COMBO_ENTRY_SIZE);
+    const uint16_t off = (uint16_t)(EN_COMBO_OFF + (uint16_t)index * VIAL_COMBO_ENTRY_SIZE);
     for (uint8_t i = 0; i < 4; i++) {
-        entry_sector[off + i * 2]     = (uint8_t)(entry->input[i] >> 8);
-        entry_sector[off + i * 2 + 1] = (uint8_t)(entry->input[i] & 0xFF);
+        entry_write16((uint16_t)(off + i * 2), entry->input[i]);
     }
-    entry_sector[off + 8] = (uint8_t)(entry->output >> 8);
-    entry_sector[off + 9] = (uint8_t)(entry->output & 0xFF);
+    entry_write16((uint16_t)(off + 8), entry->output);
+}
+
+static void tap_dance_read(uint8_t index, vial_tap_dance_entry_t *entry)
+{
+    const uint16_t off         = (uint16_t)(EN_TD_OFF + (uint16_t)index * VIAL_TAP_DANCE_ENTRY_SIZE);
+    entry->on_tap              = entry_read16((uint16_t)(off + 0));
+    entry->on_hold             = entry_read16((uint16_t)(off + 2));
+    entry->on_double_tap       = entry_read16((uint16_t)(off + 4));
+    entry->on_tap_hold         = entry_read16((uint16_t)(off + 6));
+    entry->custom_tapping_term = entry_read16((uint16_t)(off + 8));
+}
+
+static void tap_dance_write(uint8_t index, const vial_tap_dance_entry_t *entry)
+{
+    const uint16_t off = (uint16_t)(EN_TD_OFF + (uint16_t)index * VIAL_TAP_DANCE_ENTRY_SIZE);
+    entry_write16((uint16_t)(off + 0), entry->on_tap);
+    entry_write16((uint16_t)(off + 2), entry->on_hold);
+    entry_write16((uint16_t)(off + 4), entry->on_double_tap);
+    entry_write16((uint16_t)(off + 6), entry->on_tap_hold);
+    entry_write16((uint16_t)(off + 8), entry->custom_tapping_term);
+}
+
+static void key_override_read(uint8_t index, vial_key_override_entry_t *entry)
+{
+    const uint16_t off       = (uint16_t)(EN_KO_OFF + (uint16_t)index * VIAL_KEY_OVERRIDE_ENTRY_SIZE);
+    entry->trigger           = entry_read16((uint16_t)(off + 0));
+    entry->replacement       = entry_read16((uint16_t)(off + 2));
+    entry->layers            = entry_read16((uint16_t)(off + 4));
+    entry->trigger_mods      = entry_sector[off + 6];
+    entry->negative_mod_mask = entry_sector[off + 7];
+    entry->suppressed_mods   = entry_sector[off + 8];
+    entry->options           = entry_sector[off + 9];
+}
+
+static void key_override_write(uint8_t index, const vial_key_override_entry_t *entry)
+{
+    const uint16_t off = (uint16_t)(EN_KO_OFF + (uint16_t)index * VIAL_KEY_OVERRIDE_ENTRY_SIZE);
+    entry_write16((uint16_t)(off + 0), entry->trigger);
+    entry_write16((uint16_t)(off + 2), entry->replacement);
+    entry_write16((uint16_t)(off + 4), entry->layers);
+    entry_sector[off + 6] = entry->trigger_mods;
+    entry_sector[off + 7] = entry->negative_mod_mask;
+    entry_sector[off + 8] = entry->suppressed_mods;
+    entry_sector[off + 9] = entry->options;
 }
 
 uint8_t dynamic_keymap_combo_count(void)
@@ -385,7 +455,57 @@ int dynamic_keymap_set_combo(uint8_t index, const vial_combo_entry_t *entry)
     return 0;
 }
 
-#    else // VIAL_COMBO_ENTRIES == 0
+uint8_t dynamic_keymap_tap_dance_count(void)
+{
+    return VIAL_TAP_DANCE_ENTRIES;
+}
+
+int dynamic_keymap_get_tap_dance(uint8_t index, vial_tap_dance_entry_t *entry)
+{
+    if (!entry_ready || index >= VIAL_TAP_DANCE_ENTRIES) {
+        return 1;
+    }
+    tap_dance_read(index, entry);
+    return 0;
+}
+
+int dynamic_keymap_set_tap_dance(uint8_t index, const vial_tap_dance_entry_t *entry)
+{
+    if (!entry_ready || index >= VIAL_TAP_DANCE_ENTRIES) {
+        return 1;
+    }
+    entry_begin();
+    tap_dance_write(index, entry);
+    entry_commit();
+    return 0;
+}
+
+uint8_t dynamic_keymap_key_override_count(void)
+{
+    return VIAL_KEY_OVERRIDE_ENTRIES;
+}
+
+int dynamic_keymap_get_key_override(uint8_t index, vial_key_override_entry_t *entry)
+{
+    if (!entry_ready || index >= VIAL_KEY_OVERRIDE_ENTRIES) {
+        return 1;
+    }
+    key_override_read(index, entry);
+    return 0;
+}
+
+int dynamic_keymap_set_key_override(uint8_t index, const vial_key_override_entry_t *entry)
+{
+    if (!entry_ready || index >= VIAL_KEY_OVERRIDE_ENTRIES) {
+        return 1;
+    }
+    entry_begin();
+    key_override_write(index, entry);
+    entry_commit();
+    return 0;
+}
+
+#    else // no dynamic entries configured
 
 static void dynamic_entry_init(void) {}
 
@@ -408,7 +528,45 @@ int dynamic_keymap_set_combo(uint8_t index, const vial_combo_entry_t *entry)
     return 1;
 }
 
-#    endif // VIAL_COMBO_ENTRIES
+uint8_t dynamic_keymap_tap_dance_count(void)
+{
+    return 0;
+}
+
+int dynamic_keymap_get_tap_dance(uint8_t index, vial_tap_dance_entry_t *entry)
+{
+    (void)index;
+    (void)entry;
+    return 1;
+}
+
+int dynamic_keymap_set_tap_dance(uint8_t index, const vial_tap_dance_entry_t *entry)
+{
+    (void)index;
+    (void)entry;
+    return 1;
+}
+
+uint8_t dynamic_keymap_key_override_count(void)
+{
+    return 0;
+}
+
+int dynamic_keymap_get_key_override(uint8_t index, vial_key_override_entry_t *entry)
+{
+    (void)index;
+    (void)entry;
+    return 1;
+}
+
+int dynamic_keymap_set_key_override(uint8_t index, const vial_key_override_entry_t *entry)
+{
+    (void)index;
+    (void)entry;
+    return 1;
+}
+
+#    endif // dynamic entries
 
 void dynamic_keymap_init(void)
 {

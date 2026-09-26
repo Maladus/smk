@@ -68,6 +68,8 @@ ESC_ROW, ESC_COL = 0, 0
 MATRIX_COLS = 14
 
 KC_A = 0x0004
+KC_B = 0x0005
+KC_C = 0x0006
 KC_J = 0x000D
 KC_K = 0x000E
 KC_L = 0x000F
@@ -75,9 +77,11 @@ KC_Q = 0x0014
 KC_1 = 0x001E
 KC_ENTER = 0x0028
 KC_ESC = 0x0029
+KC_BACKSPACE = 0x002A
 KC_TAB = 0x002B
 KC_SPC = 0x002C
 KC_GRV = 0x0035
+KC_DELETE = 0x004C
 KC_LEFT = 0x0050
 
 # Modifier bits (report.h / keycodes.h): bit 1 is Left Shift.
@@ -93,6 +97,10 @@ QK_LAYER_TAP = 0x4000
 QK_LAYER_MOD = 0x5000
 QK_ONE_SHOT_LAYER = 0x5280
 QK_LAYER_TAP_TOGGLE = 0x52C0
+QK_TAP_DANCE = 0x5700
+
+# Vial key-override option bit for an enabled entry.
+KO_ENABLED = 0x80
 
 REPORT_ID_KEYBOARD = 4
 REPORT_ID_CONSUMER = 2
@@ -418,6 +426,41 @@ class VialSim(Rk61Sim):
         inputs = [(out[1 + i * 2] << 8) | out[2 + i * 2] for i in range(4)]
         output = (out[9] << 8) | out[10]
         return out[0], inputs, output
+
+    def tap_dance_task(self):
+        self.call(self.sym["tap_dance_task"])
+
+    def tap_dance_count(self):
+        return self.vial([0xFE, 0x0D, 0x00])[0]
+
+    def set_tap_dance(self, index, on_tap=0, on_hold=0, on_double_tap=0, on_tap_hold=0, term=0):
+        payload = []
+        for v in (on_tap, on_hold, on_double_tap, on_tap_hold, term):
+            payload += [(v >> 8) & 0xFF, v & 0xFF]
+        return self.vial([0xFE, 0x0D, 0x02, index] + payload)[0]
+
+    def get_tap_dance(self, index):
+        out = self.vial([0xFE, 0x0D, 0x01, index])
+        vals = [(out[1 + i * 2] << 8) | out[2 + i * 2] for i in range(5)]
+        return out[0], vals
+
+    def key_override_count(self):
+        return self.vial([0xFE, 0x0D, 0x00])[2]
+
+    def set_key_override(self, index, trigger, replacement, layers=0,
+                         trigger_mods=0, negative_mod_mask=0, suppressed_mods=0, options=KO_ENABLED):
+        payload = [(trigger >> 8) & 0xFF, trigger & 0xFF,
+                   (replacement >> 8) & 0xFF, replacement & 0xFF,
+                   (layers >> 8) & 0xFF, layers & 0xFF,
+                   trigger_mods, negative_mod_mask, suppressed_mods, options]
+        return self.vial([0xFE, 0x0D, 0x06, index] + payload)[0]
+
+    def get_key_override(self, index):
+        out = self.vial([0xFE, 0x0D, 0x05, index])
+        trigger = (out[1] << 8) | out[2]
+        replacement = (out[3] << 8) | out[4]
+        layers = (out[5] << 8) | out[6]
+        return out[0], (trigger, replacement, layers, out[7], out[8], out[9], out[10])
 
     # --- report capture ---------------------------------------------------
     def ep1_reports(self):
@@ -1119,6 +1162,120 @@ class TestVialCombos(unittest.TestCase):
         self.assertFalse(any(KC_ENTER in r for r in reports), "the chord must not fire")
         self.kb.key_event(*self.J, False)
         self.kb.key_event(2, 1, False)
+
+
+# --- tap dance -------------------------------------------------------------
+
+
+class TestVialTapDance(unittest.TestCase):
+    """Vial tap dance over the dynamic-entry command."""
+
+    TD_ROW, TD_COL = 0, 0  # Esc position
+
+    def setUp(self):
+        self.kb = VialSim()
+        self.kb.boot_usb()
+        self.kb.set_keycode(0, self.TD_ROW, self.TD_COL, QK_TAP_DANCE)  # TD(0)
+
+    def tearDown(self):
+        self.kb.close()
+
+    def test_entry_count(self):
+        self.assertEqual(self.kb.tap_dance_count(), 8)
+
+    def test_get_set_roundtrip(self):
+        self.assertEqual(self.kb.set_tap_dance(0, KC_A, KC_B, KC_C, 0, 150), 0)
+        status, vals = self.kb.get_tap_dance(0)
+        self.assertEqual(status, 0)
+        self.assertEqual(vals, [KC_A, KC_B, KC_C, 0, 150])
+
+    def test_single_tap(self):
+        self.kb.set_tap_dance(0, on_tap=KC_A, on_hold=KC_B, on_double_tap=KC_C)
+        self.kb.set_tick(0)
+        self.kb.key_event(self.TD_ROW, self.TD_COL, True)
+        self.kb.set_tick(10)
+        self.kb.key_event(self.TD_ROW, self.TD_COL, False)
+        self.kb.set_tick(300)
+        self.kb.tap_dance_task()
+        reps = self.kb.ep1_reports()
+        self.assertTrue(any(KC_A in r for r in reps), f"single tap -> A; {reps}")
+
+    def test_double_tap(self):
+        self.kb.set_tap_dance(0, on_tap=KC_A, on_hold=KC_B, on_double_tap=KC_C)
+        self.kb.set_tick(0)
+        self.kb.key_event(self.TD_ROW, self.TD_COL, True)
+        self.kb.set_tick(10)
+        self.kb.key_event(self.TD_ROW, self.TD_COL, False)
+        self.kb.set_tick(20)
+        self.kb.key_event(self.TD_ROW, self.TD_COL, True)
+        self.kb.set_tick(30)
+        self.kb.key_event(self.TD_ROW, self.TD_COL, False)
+        self.kb.set_tick(300)
+        self.kb.tap_dance_task()
+        reps = self.kb.ep1_reports()
+        self.assertTrue(any(KC_C in r for r in reps), f"double tap -> C; {reps}")
+
+    def test_hold(self):
+        self.kb.set_tap_dance(0, on_tap=KC_A, on_hold=KC_B, on_double_tap=KC_C)
+        self.kb.set_tick(0)
+        self.kb.key_event(self.TD_ROW, self.TD_COL, True)
+        self.kb.set_tick(300)
+        self.kb.tap_dance_task()
+        self.assertEqual(self.kb.report()[2], KC_B, "hold -> B")
+        self.kb.key_event(self.TD_ROW, self.TD_COL, False)
+        self.assertEqual(self.kb.report()[2], 0)
+
+
+# --- key overrides ---------------------------------------------------------
+
+
+class TestVialKeyOverride(unittest.TestCase):
+    """Vial key overrides over the dynamic-entry command."""
+
+    KO_ROW, KO_COL = 0, 0  # Esc position, remapped to Backspace
+
+    def setUp(self):
+        self.kb = VialSim()
+        self.kb.boot_usb()
+        self.kb.set_keycode(0, self.KO_ROW, self.KO_COL, KC_BACKSPACE)
+
+    def tearDown(self):
+        self.kb.close()
+
+    def test_entry_count(self):
+        self.assertEqual(self.kb.key_override_count(), 8)
+
+    def test_get_set_roundtrip(self):
+        self.assertEqual(self.kb.set_key_override(0, KC_BACKSPACE, KC_DELETE), 0)
+        status, entry = self.kb.get_key_override(0)
+        self.assertEqual(status, 0)
+        self.assertEqual(entry, (KC_BACKSPACE, KC_DELETE, 0, 0, 0, 0, KO_ENABLED))
+
+    def test_override_replaces_key(self):
+        self.kb.set_key_override(0, KC_BACKSPACE, KC_DELETE)
+        self.kb.key_event(self.KO_ROW, self.KO_COL, True)
+        self.assertEqual(self.kb.report()[2], KC_DELETE)
+        self.kb.key_event(self.KO_ROW, self.KO_COL, False)
+        self.assertEqual(self.kb.report()[2], 0)
+
+    def test_disabled_override_ignored(self):
+        self.kb.set_key_override(0, KC_BACKSPACE, KC_DELETE, options=0)
+        self.kb.key_event(self.KO_ROW, self.KO_COL, True)
+        self.assertEqual(self.kb.report()[2], KC_BACKSPACE)
+        self.kb.key_event(self.KO_ROW, self.KO_COL, False)
+
+    def test_trigger_mods(self):
+        self.kb.set_key_override(0, KC_BACKSPACE, KC_DELETE, trigger_mods=MOD_LSFT)
+        # without shift: Backspace
+        self.kb.key_event(self.KO_ROW, self.KO_COL, True)
+        self.assertEqual(self.kb.report()[2], KC_BACKSPACE)
+        self.kb.key_event(self.KO_ROW, self.KO_COL, False)
+        # with shift: Delete
+        self.kb.key_event(3, 0, True)  # Left Shift
+        self.kb.key_event(self.KO_ROW, self.KO_COL, True)
+        self.assertEqual(self.kb.report()[2], KC_DELETE)
+        self.kb.key_event(self.KO_ROW, self.KO_COL, False)
+        self.kb.key_event(3, 0, False)
 
 
 # --- EP1 report protocol ---------------------------------------------------

@@ -16,4 +16,6 @@ src_smk += files(
     'dynamic_keymap.c',
     'tapping.c',
     'combo.c',
+    'tap_dance.c',
+    'key_override.c',
 )
