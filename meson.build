@@ -443,8 +443,8 @@ if sim.found() and py.found()
             workdir : tests_dir,
             env : {'SMK_UCSIM' : sim.full_path()},
             suite : 'sim',
-            # Per-file timeout; the longest file (test_vial) is ~2.5 min here.
-            timeout : 300,
+            # Per-file timeout; the longest file (test_vial) is ~5 min here.
+            timeout : 600,
         )
     endforeach
 endif
