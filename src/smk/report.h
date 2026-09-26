@@ -10,6 +10,14 @@
 #define NKRO_REPORT_BITS 20 // limited by wireless dongle hid descriptor
 #define NKRO_REPORT_SIZE 2 + NKRO_REPORT_BITS
 
+#ifdef VIAL_ENABLE
+// The Vial keyboard lives on the 16-byte EP1, so its NKRO report carries 13
+// bytes of key bits (keys 0x00-0x67, everything but F13-F24): report id + mods
+// + bits = 15 bytes. The wireless dongle keeps the wider 20-byte bitfield.
+#    define NKRO_USB_REPORT_BITS 13
+#    define NKRO_USB_REPORT_SIZE (2 + NKRO_USB_REPORT_BITS)
+#endif
+
 #define EXTRA_REPORT_SIZE 3
 
 #ifdef VIAL_ENABLE

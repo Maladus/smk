@@ -337,6 +337,35 @@ const uint8_t hid_report_desc_vial_extra[] = {
         HID_RI_INPUT(8, HID_IOF_DATA | HID_IOF_VARIABLE | HID_IOF_ABSOLUTE),
     HID_RI_END_COLLECTION(0),
 #endif // DEBUG
+
+#ifdef NKRO_ENABLE
+    // NKRO keyboard (report id 6): 13 bytes of key bits (keys 0x00-0x67) so the
+    // numbered report fits the 16-byte EP1.
+    HID_RI_USAGE_PAGE(8, 0x01),           // Generic Desktop
+    HID_RI_USAGE(8, 0x06),                // Keyboard
+    HID_RI_COLLECTION(8, 0x01),           // Application
+        HID_RI_REPORT_ID(8, REPORT_ID_NKRO),
+        // Modifiers (8 bits)
+        HID_RI_USAGE_PAGE(8, 0x07),     // Keyboard/Keypad
+        HID_RI_USAGE_MINIMUM(8, 0xe0),
+        HID_RI_USAGE_MAXIMUM(8, 0xe7),
+        HID_RI_LOGICAL_MINIMUM(8, 0x00),
+        HID_RI_LOGICAL_MAXIMUM(8, 0x01),
+        HID_RI_REPORT_SIZE(8, 0x01),
+        HID_RI_REPORT_COUNT(8, 0x08),
+        HID_RI_INPUT(8, HID_IOF_DATA | HID_IOF_VARIABLE | HID_IOF_ABSOLUTE),
+
+        // NKRO bits
+        HID_RI_USAGE_PAGE(8, 0x07),
+        HID_RI_USAGE_MINIMUM(8, 0x00),
+        HID_RI_USAGE_MAXIMUM(8, NKRO_USB_REPORT_BITS * 8 - 1),
+        HID_RI_LOGICAL_MINIMUM(8, 0x00),
+        HID_RI_LOGICAL_MAXIMUM(8, 0x01),
+        HID_RI_REPORT_SIZE(8, 1),
+        HID_RI_REPORT_COUNT(8, NKRO_USB_REPORT_BITS * 8),
+        HID_RI_INPUT(8, HID_IOF_DATA | HID_IOF_VARIABLE | HID_IOF_ABSOLUTE),
+    HID_RI_END_COLLECTION(0),
+#endif // NKRO_ENABLE
     // clang-format on
 };
 
@@ -636,12 +665,13 @@ void usb_send_report(__xdata report_keyboard_t *report)
 
 void usb_send_nkro(__xdata report_nkro_t *report)
 {
-#ifdef VIAL_ENABLE
-    (void)report; // NKRO is not part of the Vial report layout
-#else
     if (!usb_is_configured()) {
         return;
     }
+#ifdef VIAL_ENABLE
+    // Interface 1's numbered NKRO report rides EP1 like the keyboard report.
+    usb_hw_ep1_in_send(report->raw, NKRO_USB_REPORT_SIZE);
+#else
     usb_hw_ep2_in_send(report->raw, NKRO_REPORT_SIZE);
 #endif
 }

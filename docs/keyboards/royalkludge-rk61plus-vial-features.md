@@ -18,19 +18,12 @@ work with effort and implementation notes.
 - Tap dance (TD) and key overrides, sharing the dynamic-entry store with combos.
 - Macros: the VIA macro buffer (0x0C-0x10) and a send-string player.
 - Eight layers, with a keymap store that spans two flash sectors per A/B copy.
+- NKRO over USB (report id 6, a 13-byte key bitfield on EP1); the wireless path
+  keeps its wider bitfield.
 
 ## Missing features
 
 Ordered by value per effort.
-
-### 1. NKRO — small-medium
-
-- `src/smk/report.h`: USB bitfield 13 bytes (15-byte report, fits EP1) vs the
-  RF 20 bytes for the dongle. 13 bytes covers keys 0x00-0x67, everything except
-  F13-F24.
-- `src/smk/usb.c`: NKRO report id in the vial interface-1 descriptor, and
-  `usb_send_nkro` sends a numbered NKRO report on EP1 like the 6KRO report.
-- `meson.build`: `nkro: true`.
 
 ### 1. Lighting — medium (VIA GUI, not Vial GUI)
 
@@ -120,11 +113,13 @@ Multi-sector keymap store, `vial_layers: 8`.
 Milestone: 8 layers in Vial GUI, keymap still survives reflash. Covered by
 `tests/test_vial.py::TestVialLayers::test_layer_7_keycode`.
 
-### Phase 6: NKRO — small-medium
+### Phase 6: NKRO — DONE
 
 13-byte USB bitfield, NKRO report on EP1, `nkro: true`.
 
-Milestone: NKRO over USB, RF/dongle path unchanged.
+Milestone: NKRO over USB, RF/dongle path unchanged. Covered by
+`tests/test_vial.py::TestVialNkro`. NKRO is on by default; tests that check the
+6KRO frame force `keymap_config.nkro = 0`.
 
 ### Phase 7: Lighting — medium, optional
 

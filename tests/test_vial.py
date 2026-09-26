@@ -103,10 +103,13 @@ QK_TAP_DANCE = 0x5700
 KO_ENABLED = 0x80
 
 REPORT_ID_KEYBOARD = 4
+REPORT_ID_NKRO = 6
 REPORT_ID_CONSUMER = 2
 RAW_HID_REPORT_SIZE = 32
 EP1_BUF_SIZE = 16
 EP2_BUF_SIZE = 64
+# USB NKRO: report id + mods + 13 bytes of key bits.
+NKRO_USB_REPORT_SIZE = 15
 
 # The four 512-byte keymap sectors (the 8-layer store spans two sectors per
 # A/B copy), the dynamic-entry (combo/tap-dance/key-override) sectors and the
@@ -279,12 +282,17 @@ class VialSim(Rk61Sim):
         self.report_addr = self.sym["keyboard_report"]
 
     # --- boot -------------------------------------------------------------
-    def boot_usb(self, quiet=True):
+    def boot_usb(self, quiet=True, nkro=False):
         """Boot to the main loop, mark USB configured, and (by default) disable
         interrupts so the Timer2 scan ISR cannot overwrite the matrix[] cells a
-        test injects. `quiet=False` keeps EA set for the EP0 transport test."""
+        test injects. `quiet=False` keeps EA set for the EP0 transport test.
+
+        NKRO is forced off by default so the report-path tests see plain 6KRO
+        frames; `nkro=True` leaves the boot default (NKRO on) in place."""
         self.boot()
         self.set_xram(self.usb_state, [2])  # CONFIGURED
+        if not nkro:
+            self.set_xram(self.sym["keymap_config"], [0])
         if quiet:
             self.set_sfr(0xA8, 0x00)  # IEN0 = 0: no interrupt vectors
 
@@ -614,10 +622,12 @@ class TestVialDescriptors(unittest.TestCase):
         # The keyboard report is exactly the report id + the 8-byte 6KRO body.
         self.assertEqual(report_bytes(lengths[REPORT_ID_KEYBOARD]["input"], with_id=True), 9)
 
-    def test_no_nkro_report_id(self):
-        """Phase A ships 6KRO only: no report id 6 anywhere in interface 1."""
+    def test_nkro_report_id_present(self):
+        """Interface 1 advertises report id 6 (NKRO) and the report fits EP1."""
         lengths = hid_report_lengths(self.report_extra)
-        self.assertNotIn(6, lengths, "no NKRO report id 6 before Phase E")
+        self.assertIn(6, lengths, "NKRO report id 6")
+        self.assertEqual(report_bytes(lengths[6]["input"], with_id=True), NKRO_USB_REPORT_SIZE)
+        self.assertLessEqual(report_bytes(lengths[6]["input"], with_id=True), EP1_BUF_SIZE)
 
     def test_serial_string_contains_vial_magic(self):
         """The serial string must carry Vial's magic so the GUI lists the board."""
@@ -1377,6 +1387,48 @@ class TestVialMacros(unittest.TestCase):
         self.kb.key_event(self.MACRO_ROW, self.MACRO_COL, False)
 
 
+# --- NKRO ------------------------------------------------------------------
+
+
+class TestVialNkro(unittest.TestCase):
+    """NKRO over USB: with NKRO on, the keyboard report is report id 6 on EP1
+    with a 13-byte key bitfield."""
+
+    def setUp(self):
+        self.kb = VialSim()
+        self.kb.boot_usb(nkro=True)
+
+    def tearDown(self):
+        self.kb.close()
+
+    def test_nkro_report_on_ep1(self):
+        self.kb.set_keycode(0, ESC_ROW, ESC_COL, KC_A)
+        self.kb.key_event(ESC_ROW, ESC_COL, True)
+        reps = self.kb.ep1_reports()
+        self.kb.key_event(ESC_ROW, ESC_COL, False)
+        nkro = [r for r in reps if r and r[0] == REPORT_ID_NKRO]
+        self.assertTrue(nkro, f"expected an NKRO report; {reps}")
+        rpt = nkro[-1]
+        self.assertEqual(len(rpt), NKRO_USB_REPORT_SIZE)
+        self.assertEqual(rpt[2 + (KC_A >> 3)] & (1 << (KC_A & 7)), 1 << (KC_A & 7))
+
+    def test_nkro_rollover(self):
+        """Seven held keys all appear in the bitfield, which 6KRO cannot do."""
+        keys = [KC_A, KC_B, KC_C, 0x0007, 0x0008, 0x0009, 0x000A]
+        for i, kc in enumerate(keys):
+            self.kb.set_keycode(0, 0, i, kc)
+        for i in range(len(keys)):
+            self.kb.key_event(0, i, True)
+        reps = self.kb.ep1_reports()
+        nkro = [r for r in reps if r and r[0] == REPORT_ID_NKRO]
+        self.assertTrue(nkro, f"expected an NKRO report; {reps}")
+        rpt = nkro[-1]
+        for kc in keys:
+            self.assertTrue(rpt[2 + (kc >> 3)] & (1 << (kc & 7)), f"key {kc:#x} missing")
+        for i in range(len(keys)):
+            self.kb.key_event(0, i, False)
+
+
 # --- EP1 report protocol ---------------------------------------------------
 
 
@@ -1390,6 +1442,9 @@ class TestVialRfReport(unittest.TestCase):
     def setUp(self):
         self.kb = Rk61RfSim(firmware=VIAL_FIRMWARE)
         self.kb.boot()
+        # This class checks the plain 6KRO frame, so force NKRO off (it is on by
+        # default now that the build enables it).
+        self.kb.set_xram(self.kb._a("keymap_config"), [0])
         self.kb.set_band_24g(False)  # BLE
         self.kb.set_wired(False)     # wireless
         self.slave = RfSlave(self.kb)

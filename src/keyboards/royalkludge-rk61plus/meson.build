@@ -27,7 +27,7 @@ keyboards += {
                 ),
                 'options' : {
                     'vial' : true,
-                    'nkro' : false,
+                    'nkro' : true,
                     'serial' : 'vial:f64c2b3c',
                     'vial_layers' : 8,
                     'vial_keymap_sectors' : 4,
