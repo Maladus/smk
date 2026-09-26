@@ -178,8 +178,7 @@ enum custom_keycodes {
     SPD_UP,  // animation speed up
     BRI_DN,  // backlight brightness down
     BRI_UP,  // backlight brightness up
-    CLR_FWD, // step the colour wheel forward
-    CLR_BAK, // step the colour wheel back
+    CLR_FWD, // cycle through the predefined colours
 
     KB_SAFE_RANGE,
 };

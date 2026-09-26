@@ -706,7 +706,7 @@ class TestVialProtocol(unittest.TestCase):
         keys = [cell for row in doc["layouts"]["keymap"] for cell in row
                 if isinstance(cell, str) and "," in cell]
         self.assertEqual(len(keys), 61, "61-key layout")
-        self.assertEqual(len(doc["customKeycodes"]), 11, "11 custom board keys")
+        self.assertEqual(len(doc["customKeycodes"]), 10, "10 custom board keys")
 
     def test_qmk_settings_query(self):
         out = self.kb.vial([0xFE, 0x09])
@@ -1447,17 +1447,19 @@ class TestVialLighting(unittest.TestCase):
         self.kb.close()
 
     def test_set_get_roundtrip(self):
-        for value_id, value in ((self.BRIGHTNESS, 200), (self.EFFECT, 3), (self.SPEED, 7), (self.COLOR, 100)):
+        for value_id, value in ((self.BRIGHTNESS, 200), (self.EFFECT, 3), (self.SPEED, 7)):
             self.kb.vial([0x07, self.CHANNEL, value_id, value])
             out = self.kb.vial([0x08, self.CHANNEL, value_id])
             self.assertEqual(out[2], value_id)
             self.assertEqual(out[3], value)
 
-    def test_color_reply_has_two_bytes(self):
-        self.kb.vial([0x07, self.CHANNEL, self.COLOR, 100])
+    def test_color_maps_to_palette(self):
+        """VIA's 0-255 hue maps onto the 10 palette slots and back."""
+        self.kb.vial([0x07, self.CHANNEL, self.COLOR, 102])  # -> slot 4
         out = self.kb.vial([0x08, self.CHANNEL, self.COLOR])
-        self.assertEqual(out[3], 100)
+        self.assertEqual(out[3], 102)
         self.assertEqual(out[4], 0xFF)
+        self.assertEqual(self.kb.get_xram(self.kb.sym["user_settings"], 4)[3], 4)
 
     def test_save_persists(self):
         self.kb.vial([0x07, self.CHANNEL, self.BRIGHTNESS, 123])
@@ -1470,15 +1472,15 @@ class TestVialLighting(unittest.TestCase):
         out = self.kb.vial([0x08, 9, self.BRIGHTNESS])
         self.assertEqual(out[0], 0xFF)
 
-    def test_color_key_steps_wheel(self):
-        """Fn+'.' (the '>' key) steps user_settings.led_color by one wheel step."""
+    def test_color_key_steps_palette(self):
+        """Fn+'.' (the '>' key) cycles the 10 predefined colours."""
         self.kb.key_event(FN_ROW, FN_COL, True)
         self.kb.key_event(3, 9, True)
         self.kb.key_event(3, 9, False)
         self.kb.key_event(FN_ROW, FN_COL, False)
         # user_settings: led_effect, led_brightness, led_speed, led_color
         color = self.kb.get_xram(self.kb.sym["user_settings"], 4)[3]
-        self.assertEqual(color, 32, "CLR_FWD must step the colour wheel")
+        self.assertEqual(color, 1, "CLR_FWD must advance the palette slot")
 
 
 # --- EP1 report protocol ---------------------------------------------------

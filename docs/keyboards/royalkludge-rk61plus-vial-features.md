@@ -26,9 +26,9 @@ work with effort and implementation notes.
 
 ## Remaining work
 
-All planned phases are implemented. The lighting colour (the VIA value or the
-`Fn`+`.` colour key) is a wheel index rather than a free HSV pick, so it steps
-round the wheel; a future change could add a user HSV slot to `led_effect.c`.
+All planned phases are implemented. The lighting colour is a slot in a
+10-colour palette (`LED_COLOR_COUNT`), cycled by the single `Fn`+`.` key or set
+from VIA; a future change could expose a free HSV pick instead.
 
 ## Constraints
 

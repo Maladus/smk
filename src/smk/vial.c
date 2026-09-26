@@ -3,6 +3,7 @@
 #include "kbdef.h"
 #include "keycodes.h"
 #include "layout.h"
+#include "led_effect.h"
 #include "matrix.h"
 #include "settings.h"
 #include "tick.h"
@@ -595,10 +596,12 @@ static void vial_custom_value(const uint8_t *in, uint8_t *out, bool is_get)
 
         case VIA_RGB_MATRIX_COLOR:
             if (is_get) {
-                out[3] = user_settings.led_color;
-                out[4] = 0xFF; // saturation is fixed; the effect uses the hue index
+                // Report the palette slot as a 0-255 hue (rounded so it maps
+                // back to the same slot).
+                out[3] = (uint8_t)(((uint16_t)user_settings.led_color * 256) / LED_COLOR_COUNT);
+                out[4] = 0xFF; // saturation is fixed
             } else {
-                user_settings.led_color = in[3];
+                user_settings.led_color = (uint8_t)(((uint16_t)in[3] * LED_COLOR_COUNT + 128) >> 8);
             }
             break;
 

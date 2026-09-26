@@ -33,6 +33,29 @@ void led_color_wheel(uint8_t index, uint8_t out[3])
     }
 }
 
+// Predefined colours the colour key cycles through. Slot 0 is red so the
+// default solid effect is unchanged.
+static const __code uint8_t led_color_palette_table[LED_COLOR_COUNT][3] = {
+    {255, 0, 0},   // red
+    {255, 96, 0},  // orange
+    {255, 200, 0}, // yellow
+    {0, 255, 0},   // green
+    {0, 255, 160}, // spring
+    {0, 255, 255}, // cyan
+    {0, 128, 255}, // azure
+    {0, 0, 255},   // blue
+    {160, 0, 255}, // violet
+    {255, 0, 200}, // magenta
+};
+
+void led_color_palette(uint8_t index, uint8_t out[3])
+{
+    index  = (uint8_t)(index % LED_COLOR_COUNT);
+    out[0] = led_color_palette_table[index][0];
+    out[1] = led_color_palette_table[index][1];
+    out[2] = led_color_palette_table[index][2];
+}
+
 bool led_effect_rgb(led_effect_t fx, uint8_t row, uint8_t col, uint8_t phase, uint8_t brightness, uint8_t out[3])
 {
     if (fx == FX_SOLID) {
@@ -62,9 +85,9 @@ bool led_effect_rgb_colored(led_effect_t fx, uint8_t row, uint8_t col, uint8_t p
         return true;
     }
     if (fx == FX_SOLID_RED) {
-        // Colourable solid (red at color 0). Round so full brightness stays
-        // exact (the animated path's >>8 truncates 255 to 254).
-        led_color_wheel(color, out);
+        // Colourable solid: the palette colour at full brightness must stay
+        // exact, so round instead of truncating (>>8 turns 255 into 254).
+        led_color_palette(color, out);
         out[0] = (uint8_t)(((uint16_t)out[0] * brightness + 255) >> 8);
         out[1] = (uint8_t)(((uint16_t)out[1] * brightness + 255) >> 8);
         out[2] = (uint8_t)(((uint16_t)out[2] * brightness + 255) >> 8);
@@ -73,7 +96,8 @@ bool led_effect_rgb_colored(led_effect_t fx, uint8_t row, uint8_t col, uint8_t p
     if (fx >= FX_OFF) {
         return false;
     }
-    led_color_wheel((uint8_t)(led_effect_index(fx, row, col, phase) + color), out);
+    // Animated effects keep their rainbow; the palette slot shifts its phase.
+    led_color_wheel((uint8_t)(led_effect_index(fx, row, col, phase) + color * (256 / LED_COLOR_COUNT)), out);
     out[0] = (uint8_t)(((uint16_t)out[0] * brightness) >> 8);
     out[1] = (uint8_t)(((uint16_t)out[1] * brightness) >> 8);
     out[2] = (uint8_t)(((uint16_t)out[2] * brightness) >> 8);

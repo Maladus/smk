@@ -69,7 +69,7 @@ const uint16_t keymaps[][MATRIX_ROWS][MATRIX_COLS] = {
      * `------------------------------------------------------------'
      * BT1/BT2/BT3 = Bluetooth channel select (hold 3-5 s to pair).
      * Backlight: Fn+\ cycles the effect, Fn+[ / ] brightness, Fn+; / ' speed,
-     * Fn+. steps the colour wheel (the '<'/'>' key).
+     * Fn+. cycles the predefined colours (the '<'/'>' key).
      * Special: Y PrtSc, U ScrLK, I Pause, H Insert, J Home, K PgUp,
      * N Del, M End, , PgDn. Arrows: / Up, RAlt Left, Menu Down, RCtrl Right.
      * Recovery: Fn+B jumps to the ISP bootloader (QK_BOOTLOADER), the same

@@ -25,7 +25,6 @@
     { "name": "Speed Up", "title": "Speed Up", "shortName": "SPD+" },
     { "name": "Brightness Down", "title": "Brightness Down", "shortName": "BRI-" },
     { "name": "Brightness Up", "title": "Brightness Up", "shortName": "BRI+" },
-    { "name": "Color Next", "title": "Color Next", "shortName": "CLR+" },
-    { "name": "Color Prev", "title": "Color Prev", "shortName": "CLR-" }
+    { "name": "Color Next", "title": "Color Next", "shortName": "CLR+" }
   ]
 }

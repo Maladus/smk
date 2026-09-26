@@ -13,16 +13,21 @@ typedef enum {
 
 #define FX_OFF FX_COUNT
 
+// Number of predefined colours the colour key cycles through.
+#define LED_COLOR_COUNT 10
+
 uint8_t led_effect_index(led_effect_t fx, uint8_t row, uint8_t col, uint8_t phase);
 
 void led_color_wheel(uint8_t index, uint8_t out[3]);
 
+// `index` is a palette slot (taken modulo LED_COLOR_COUNT).
+void led_color_palette(uint8_t index, uint8_t out[3]);
+
 bool led_effect_rgb(led_effect_t fx, uint8_t row, uint8_t col, uint8_t phase, uint8_t brightness, uint8_t out[3]);
 
-// As led_effect_rgb, but with a colour-wheel offset folded into the index so a
-// colour key (or the VIA lighting colour) shifts the whole animation round the
-// wheel. The FX_SOLID_RED slot renders the wheel at the offset, i.e. it is a
-// colourable solid (red at offset 0).
+// As led_effect_rgb, but `color` selects one of LED_COLOR_COUNT palette colours:
+// the FX_SOLID_RED slot renders it as a solid, and the animated effects use it
+// to shift the rainbow's phase.
 bool led_effect_rgb_colored(led_effect_t fx, uint8_t row, uint8_t col, uint8_t phase, uint8_t brightness, uint8_t color, uint8_t out[3]);
 
 bool led_effect_mono(led_effect_t fx, uint8_t row, uint8_t col, uint8_t phase, uint8_t *out);
