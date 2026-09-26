@@ -479,7 +479,7 @@ class VialSim(Rk61Sim):
 
     def macro_buffer_size(self):
         out = self.vial([0x0D])
-        return out[1] | (out[2] << 8)
+        return (out[1] << 8) | out[2]
 
     def set_macro_buffer(self, offset, data):
         return self.vial([0x0F, (offset >> 8) & 0xFF, offset & 0xFF, len(data)] + list(data))
@@ -686,7 +686,7 @@ class TestVialProtocol(unittest.TestCase):
     def test_macro_count_and_buffer_size(self):
         self.assertEqual(self.kb.vial([0x0C])[1], 8)
         out = self.kb.vial([0x0D])
-        self.assertEqual((out[1], out[2]), (256 & 0xFF, 256 >> 8))
+        self.assertEqual((out[1], out[2]), (256 >> 8, 256 & 0xFF))
 
     def test_unlock_handshake_accepts_immediately(self):
         """VIAL_INSECURE: the unlock handshake completes with no key combo."""

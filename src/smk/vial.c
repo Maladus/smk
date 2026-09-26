@@ -660,9 +660,10 @@ static void vial_handle_via(const uint8_t *in, uint8_t *out)
             return;
 
         case CMD_VIA_MACRO_GET_BUFFER_SIZE: {
+            // VIA expects big-endian here (data[1] = high byte).
             const uint16_t size = dynamic_keymap_macro_buffer_size();
-            out[1]              = (uint8_t)(size & 0xFF);
-            out[2]              = (uint8_t)(size >> 8);
+            out[1]              = (uint8_t)(size >> 8);
+            out[2]              = (uint8_t)(size & 0xFF);
             return;
         }
 
