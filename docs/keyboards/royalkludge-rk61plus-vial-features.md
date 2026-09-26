@@ -26,10 +26,9 @@ work with effort and implementation notes.
 
 ## Remaining work
 
-All planned phases are implemented. One approximation remains: the lighting
-custom values map the VIA hue to the effect engine's color-wheel index, so the
-color is quantised rather than a free HSV pick. A future change could add a user
-HSV slot to `led_effect.c`.
+All planned phases are implemented. The lighting colour (the VIA value or the
+`Fn`+`.` colour key) is a wheel index rather than a free HSV pick, so it steps
+round the wheel; a future change could add a user HSV slot to `led_effect.c`.
 
 ## Constraints
 

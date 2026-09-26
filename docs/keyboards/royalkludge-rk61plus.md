@@ -274,6 +274,7 @@ Backlight and function controls follow the RK61 Plus manual:
 | `Fn`+`\` | cycle the RGB effect |
 | `Fn`+`[` / `Fn`+`]` | brightness down / up |
 | `Fn`+`;` / `Fn`+`'` | animation speed down / up |
+| `Fn`+`.` | step the colour wheel (the `<`/`>` key) |
 | `Fn`+`Y` / `U` / `I` | PrtSc / ScrLK / Pause |
 | `Fn`+`H` / `J` / `K` | Insert / Home / PgUp |
 | `Fn`+`N` / `M` / `,` | Del / End / PgDn |

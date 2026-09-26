@@ -706,7 +706,7 @@ class TestVialProtocol(unittest.TestCase):
         keys = [cell for row in doc["layouts"]["keymap"] for cell in row
                 if isinstance(cell, str) and "," in cell]
         self.assertEqual(len(keys), 61, "61-key layout")
-        self.assertEqual(len(doc["customKeycodes"]), 9, "9 custom board keys")
+        self.assertEqual(len(doc["customKeycodes"]), 11, "11 custom board keys")
 
     def test_qmk_settings_query(self):
         out = self.kb.vial([0xFE, 0x09])
@@ -1469,6 +1469,16 @@ class TestVialLighting(unittest.TestCase):
     def test_unknown_channel_unhandled(self):
         out = self.kb.vial([0x08, 9, self.BRIGHTNESS])
         self.assertEqual(out[0], 0xFF)
+
+    def test_color_key_steps_wheel(self):
+        """Fn+'.' (the '>' key) steps user_settings.led_color by one wheel step."""
+        self.kb.key_event(FN_ROW, FN_COL, True)
+        self.kb.key_event(3, 9, True)
+        self.kb.key_event(3, 9, False)
+        self.kb.key_event(FN_ROW, FN_COL, False)
+        # user_settings: led_effect, led_brightness, led_speed, led_color
+        color = self.kb.get_xram(self.kb.sym["user_settings"], 4)[3]
+        self.assertEqual(color, 32, "CLR_FWD must step the colour wheel")
 
 
 # --- EP1 report protocol ---------------------------------------------------

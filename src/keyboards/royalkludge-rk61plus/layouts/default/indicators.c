@@ -19,6 +19,9 @@
 #define LED_BRIGHTNESS_DEFAULT 255
 #define LED_BRIGHTNESS_STEP    32
 
+// Eight steps around the colour wheel.
+#define LED_COLOR_STEP 32
+
 // nuphy-air60 DUTY2-based duty model: DUTY1=0 drives the sink LOW at the start
 // of the period and DUTY2 drives it back HIGH; the LED conducts while the sink
 // is LOW, so the on-time equals DUTY2. A direct fb -> DUTY2 mapping gives
@@ -161,6 +164,12 @@ void indicators_speed_down(void)
     settings_mark_dirty();
 }
 
+void indicators_color_step(bool forward)
+{
+    user_settings.led_color = (uint8_t)(user_settings.led_color + (forward ? LED_COLOR_STEP : (uint8_t)-LED_COLOR_STEP));
+    settings_mark_dirty();
+}
+
 void indicators_init(void)
 {
     memset(led_fb, 0, sizeof(led_fb));
@@ -286,7 +295,7 @@ static void led_regen_one(void)
 
     if (user_settings.led_effect < FX_OFF) {
         uint8_t rgb[3];
-        if (led_effect_rgb((led_effect_t)user_settings.led_effect, regen_row, regen_col, led_phase, user_settings.led_brightness, rgb)) {
+        if (led_effect_rgb_colored((led_effect_t)user_settings.led_effect, regen_row, regen_col, led_phase, user_settings.led_brightness, user_settings.led_color, rgb)) {
             r = rgb[0];
             g = rgb[1];
             b = rgb[2];

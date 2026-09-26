@@ -55,6 +55,31 @@ bool led_effect_rgb(led_effect_t fx, uint8_t row, uint8_t col, uint8_t phase, ui
     return true;
 }
 
+bool led_effect_rgb_colored(led_effect_t fx, uint8_t row, uint8_t col, uint8_t phase, uint8_t brightness, uint8_t color, uint8_t out[3])
+{
+    if (fx == FX_SOLID) {
+        out[0] = out[1] = out[2] = brightness; // white stays white
+        return true;
+    }
+    if (fx == FX_SOLID_RED) {
+        // Colourable solid (red at color 0). Round so full brightness stays
+        // exact (the animated path's >>8 truncates 255 to 254).
+        led_color_wheel(color, out);
+        out[0] = (uint8_t)(((uint16_t)out[0] * brightness + 255) >> 8);
+        out[1] = (uint8_t)(((uint16_t)out[1] * brightness + 255) >> 8);
+        out[2] = (uint8_t)(((uint16_t)out[2] * brightness + 255) >> 8);
+        return true;
+    }
+    if (fx >= FX_OFF) {
+        return false;
+    }
+    led_color_wheel((uint8_t)(led_effect_index(fx, row, col, phase) + color), out);
+    out[0] = (uint8_t)(((uint16_t)out[0] * brightness) >> 8);
+    out[1] = (uint8_t)(((uint16_t)out[1] * brightness) >> 8);
+    out[2] = (uint8_t)(((uint16_t)out[2] * brightness) >> 8);
+    return true;
+}
+
 bool led_effect_mono(led_effect_t fx, uint8_t row, uint8_t col, uint8_t phase, uint8_t *out)
 {
     if (fx == FX_SOLID) {

@@ -19,6 +19,7 @@ extern void indicators_brightness_up(void);
 extern void indicators_brightness_down(void);
 extern void indicators_speed_up(void);
 extern void indicators_speed_down(void);
+extern void indicators_color_step(bool forward);
 
 // Where keyboard reports go. The board switches select the mode, matching the
 // stock logic (0x7C00): P5.5 picks the band (2.4G vs BLE) and P5.6 low picks
@@ -183,6 +184,16 @@ bool kb_process_record(uint16_t keycode, bool key_pressed)
         case BRI_UP:
             if (key_pressed) {
                 indicators_brightness_up();
+            }
+            return false;
+        case CLR_FWD:
+            if (key_pressed) {
+                indicators_color_step(true);
+            }
+            return false;
+        case CLR_BAK:
+            if (key_pressed) {
+                indicators_color_step(false);
             }
             return false;
         default:
