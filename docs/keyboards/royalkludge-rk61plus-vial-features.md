@@ -20,17 +20,16 @@ work with effort and implementation notes.
 - Eight layers, with a keymap store that spans two flash sectors per A/B copy.
 - NKRO over USB (report id 6, a 13-byte key bitfield on EP1); the wireless path
   keeps its wider bitfield.
+- VIA lighting custom values (RGB matrix channel): brightness, effect, speed and
+  color, persisted in the settings sector. VIA GUI only; Vial GUI has no
+  lighting tab.
 
-## Missing features
+## Remaining work
 
-Ordered by value per effort.
-
-### 1. Lighting — medium (VIA GUI, not Vial GUI)
-
-- `src/smk/vial.c`: VIA 0x07/0x08/0x09 set/get/save.
-- Value-ID table mapped to effect/brightness/speed, plus a user color slot in
-  `led_effect.c`.
-- Only reachable from VIA GUI; Vial GUI has no lighting tab.
+All planned phases are implemented. One approximation remains: the lighting
+custom values map the VIA hue to the effect engine's color-wheel index, so the
+color is quantised rather than a free HSV pick. A future change could add a user
+HSV slot to `led_effect.c`.
 
 ## Constraints
 
@@ -121,11 +120,12 @@ Milestone: NKRO over USB, RF/dongle path unchanged. Covered by
 `tests/test_vial.py::TestVialNkro`. NKRO is on by default; tests that check the
 6KRO frame force `keymap_config.nkro = 0`.
 
-### Phase 7: Lighting — medium, optional
+### Phase 7: Lighting — DONE
 
-VIA 0x07/0x08/0x09 plus a user color slot. VIA GUI only, not Vial GUI.
+VIA 0x07/0x08/0x09 mapped to the RGB matrix channel. VIA GUI only, not Vial GUI.
 
-Milestone: brightness/effect/speed/color controllable from VIA GUI.
+Milestone: brightness/effect/speed/color controllable from VIA GUI. Covered by
+`tests/test_vial.py::TestVialLighting`.
 
 Order rationale: phases 1 and 2 are done; phase 3 reuses the phase 2 plumbing;
 phases 4, 5, 6 are independent of each other; phase 7 is optional and VIA-only,

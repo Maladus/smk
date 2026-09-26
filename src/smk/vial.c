@@ -4,6 +4,7 @@
 #include "keycodes.h"
 #include "layout.h"
 #include "matrix.h"
+#include "settings.h"
 #include "tick.h"
 #include <stdbool.h>
 #include <stdint.h>
@@ -35,6 +36,17 @@
 #    define CMD_VIA_GET_LAYER_COUNT       0x11
 #    define CMD_VIA_KEYMAP_GET_BUFFER     0x12
 #    define CMD_VIA_KEYMAP_SET_BUFFER     0x13
+#    define CMD_VIA_CUSTOM_SET_VALUE      0x07
+#    define CMD_VIA_CUSTOM_GET_VALUE      0x08
+#    define CMD_VIA_CUSTOM_SAVE           0x09
+
+// VIA custom-value channels / value ids (via.h). The RK61 Plus is a per-key
+// RGB board, so it uses the RGB matrix channel.
+#    define VIA_CHANNEL_RGB_MATRIX      3
+#    define VIA_RGB_MATRIX_BRIGHTNESS   1
+#    define VIA_RGB_MATRIX_EFFECT       2
+#    define VIA_RGB_MATRIX_EFFECT_SPEED 3
+#    define VIA_RGB_MATRIX_COLOR        4
 
 // VIA get_keyboard_value sub-commands
 #    define VIA_UPTIME              0x01
@@ -546,6 +558,60 @@ static void vial_keymap_set_buffer(const uint8_t *in)
     dynamic_keymap_set_offset(rd16be(in + 1), in + 4, in[3]);
 }
 
+// VIA custom values: lighting (RGB matrix channel). The request is
+// [command, channel, value_id, value_data...]; a get reply echoes that framing
+// with the value in out[3..].
+static void vial_custom_value(const uint8_t *in, uint8_t *out, bool is_get)
+{
+    if (in[1] != VIA_CHANNEL_RGB_MATRIX) {
+        out[0] = VIA_UNHANDLED;
+        return;
+    }
+
+    switch (in[2]) {
+        case VIA_RGB_MATRIX_BRIGHTNESS:
+            if (is_get) {
+                out[3] = user_settings.led_brightness;
+            } else {
+                user_settings.led_brightness = in[3];
+            }
+            break;
+
+        case VIA_RGB_MATRIX_EFFECT:
+            if (is_get) {
+                out[3] = user_settings.led_effect;
+            } else {
+                user_settings.led_effect = in[3];
+            }
+            break;
+
+        case VIA_RGB_MATRIX_EFFECT_SPEED:
+            if (is_get) {
+                out[3] = user_settings.led_speed;
+            } else {
+                user_settings.led_speed = in[3];
+            }
+            break;
+
+        case VIA_RGB_MATRIX_COLOR:
+            if (is_get) {
+                out[3] = user_settings.led_color;
+                out[4] = 0xFF; // saturation is fixed; the effect uses the hue index
+            } else {
+                user_settings.led_color = in[3];
+            }
+            break;
+
+        default:
+            out[0] = VIA_UNHANDLED;
+            return;
+    }
+
+    if (!is_get) {
+        settings_mark_dirty();
+    }
+}
+
 static void vial_handle_via(const uint8_t *in, uint8_t *out)
 {
     switch (in[0]) {
@@ -631,6 +697,20 @@ static void vial_handle_via(const uint8_t *in, uint8_t *out)
 
         case CMD_VIA_KEYMAP_SET_BUFFER:
             vial_keymap_set_buffer(in);
+            return;
+
+        case CMD_VIA_CUSTOM_SET_VALUE:
+            vial_custom_value(in, out, false);
+            return;
+
+        case CMD_VIA_CUSTOM_GET_VALUE:
+            vial_custom_value(in, out, true);
+            return;
+
+        case CMD_VIA_CUSTOM_SAVE:
+            if (in[1] == VIA_CHANNEL_RGB_MATRIX) {
+                settings_save();
+            }
             return;
 
         default:

@@ -1429,6 +1429,48 @@ class TestVialNkro(unittest.TestCase):
             self.kb.key_event(0, i, False)
 
 
+# --- lighting (VIA only) ---------------------------------------------------
+
+
+class TestVialLighting(unittest.TestCase):
+    """VIA lighting custom values (RGB matrix channel). Only VIA GUI uses this;
+    Vial GUI has no lighting tab."""
+
+    CHANNEL = 3
+    BRIGHTNESS, EFFECT, SPEED, COLOR = 1, 2, 3, 4
+
+    def setUp(self):
+        self.kb = VialSim()
+        self.kb.boot_usb()
+
+    def tearDown(self):
+        self.kb.close()
+
+    def test_set_get_roundtrip(self):
+        for value_id, value in ((self.BRIGHTNESS, 200), (self.EFFECT, 3), (self.SPEED, 7), (self.COLOR, 100)):
+            self.kb.vial([0x07, self.CHANNEL, value_id, value])
+            out = self.kb.vial([0x08, self.CHANNEL, value_id])
+            self.assertEqual(out[2], value_id)
+            self.assertEqual(out[3], value)
+
+    def test_color_reply_has_two_bytes(self):
+        self.kb.vial([0x07, self.CHANNEL, self.COLOR, 100])
+        out = self.kb.vial([0x08, self.CHANNEL, self.COLOR])
+        self.assertEqual(out[3], 100)
+        self.assertEqual(out[4], 0xFF)
+
+    def test_save_persists(self):
+        self.kb.vial([0x07, self.CHANNEL, self.BRIGHTNESS, 123])
+        self.kb.vial([0x09, self.CHANNEL])
+        self.kb.reboot()
+        out = self.kb.vial([0x08, self.CHANNEL, self.BRIGHTNESS])
+        self.assertEqual(out[3], 123)
+
+    def test_unknown_channel_unhandled(self):
+        out = self.kb.vial([0x08, 9, self.BRIGHTNESS])
+        self.assertEqual(out[0], 0xFF)
+
+
 # --- EP1 report protocol ---------------------------------------------------
 
 
