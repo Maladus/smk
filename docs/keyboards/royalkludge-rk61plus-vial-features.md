@@ -17,6 +17,7 @@ work with effort and implementation notes.
   editable in the Vial GUI and persist in their own A/B flash sector pair.
 - Tap dance (TD) and key overrides, sharing the dynamic-entry store with combos.
 - Macros: the VIA macro buffer (0x0C-0x10) and a send-string player.
+- Eight layers, with a keymap store that spans two flash sectors per A/B copy.
 
 ## Missing features
 
@@ -31,23 +32,7 @@ Ordered by value per effort.
   `usb_send_nkro` sends a numbered NKRO report on EP1 like the 6KRO report.
 - `meson.build`: `nkro: true`.
 
-### 2. More layers (8) — medium
-
-- `meson.build` (rk61plus): `vial_layers: 8`, `vial_keymap_sectors: 4`.
-- `src/smk/dynamic_keymap.c`: the store assumes the keymap fits one 512-byte
-  sector. Rework it to span sectors:
-  - staging buffer sized to `VIAL_KEYMAP_TOTAL` (992 bytes for 8 layers),
-  - `store_commit` erases and programs across the sector span,
-  - `active_sector` becomes an active copy spanning sectors for A/B,
-  - replace the one-sector `_Static_assert` with a span check.
-- xdata: 8 layers adds ~480 bytes of staging RAM. The combo store and engine
-  already added ~180 bytes, so budget for ~2450 of the 4096.
-
-Keymap sizes: 16 + layers x 61 x 2 bytes. 4 layers = 504 (1 sector), 5-8 =
-626-992 (2 sectors per copy), 9-12 = 3 sectors, 13-16 = 4 sectors. With A/B
-that doubles the sector count.
-
-### 3. Lighting — medium (VIA GUI, not Vial GUI)
+### 1. Lighting — medium (VIA GUI, not Vial GUI)
 
 - `src/smk/vial.c`: VIA 0x07/0x08/0x09 set/get/save.
 - Value-ID table mapped to effect/brightness/speed, plus a user color slot in
@@ -60,9 +45,11 @@ that doubles the sector count.
   taken by the Vial raw-HID (32 bytes), so the keyboard lives on EP1 at 16
   bytes. This is why NKRO needs the smaller bitfield and lighting has no room.
 - Flash sectors: 512 bytes. The Vial region grows downward from the settings
-  sector at 0xEC00: the keymap store takes 0xE400/0xE600, the dynamic-entry
-  store 0xE800/0xEA00 and the macro buffer 0xE000/0xE200, so `code_size` is
-  0xE000.
+  sector at 0xEC00: the 8-layer keymap store takes 0xE000-0xE7FF (two sectors
+  per A/B copy), the dynamic-entry store 0xE800/0xEA00 and the macro buffer
+  0xDC00/0xDE00, so `code_size` is 0xDC00.
+- xdata: 4096 bytes general RAM; the vial target uses ~2900 after the 8-layer
+  keymap staging buffer, the entry store and the macro buffer.
 - xdata: 4096 bytes general RAM. The vial target is well under it after the
   combo store, engine and OSM state.
 - The simulator tests park on a NOP sled. It lives at 0xF000 (the app images
@@ -126,11 +113,12 @@ main-loop hook.
 Milestone: record and play a macro from Vial GUI. Covered by
 `tests/test_vial.py::TestVialMacros`.
 
-### Phase 5: More layers (8) — medium
+### Phase 5: More layers (8) — DONE
 
 Multi-sector keymap store, `vial_layers: 8`.
 
-Milestone: 8 layers in Vial GUI, keymap still survives reflash.
+Milestone: 8 layers in Vial GUI, keymap still survives reflash. Covered by
+`tests/test_vial.py::TestVialLayers::test_layer_7_keycode`.
 
 ### Phase 6: NKRO — small-medium
 

@@ -108,11 +108,11 @@ RAW_HID_REPORT_SIZE = 32
 EP1_BUF_SIZE = 16
 EP2_BUF_SIZE = 64
 
-# The two 512-byte keymap sectors and the dynamic-entry (combo) sectors. The
-# keymap store sits at VIAL_KEYMAP_ADDR (0xE400), the combo store at
-# VIAL_ENTRY_ADDR (0xE800); settings follow at 0xEC00. Only needed to
-# invalidate a store when a test wants the seeded defaults.
-KEYMAP_SECTORS = (0xE400, 0xE600)
+# The four 512-byte keymap sectors (the 8-layer store spans two sectors per
+# A/B copy), the dynamic-entry (combo/tap-dance/key-override) sectors and the
+# macro sectors. Only needed to invalidate a store when a test wants the seeded
+# defaults.
+KEYMAP_SECTORS = (0xE000, 0xE200, 0xE400, 0xE600)
 ENTRY_SECTORS = (0xE800, 0xEA00)
 
 # Simulator SFR / sled addresses (see tests/sim.py).
@@ -671,7 +671,7 @@ class TestVialProtocol(unittest.TestCase):
                          "RK61Plus UID")
 
     def test_layer_count(self):
-        self.assertEqual(self.kb.vial([0x11])[1], 4)
+        self.assertEqual(self.kb.vial([0x11])[1], 8)
 
     def test_macro_count_and_buffer_size(self):
         self.assertEqual(self.kb.vial([0x0C])[1], 8)
@@ -870,7 +870,20 @@ class TestVialLayers(unittest.TestCase):
         self.kb.set_keycode(0, FN_ROW, 0, QK_TO | 0x1F)
         self.kb.key_event(FN_ROW, 0, True)
         self.kb.key_event(FN_ROW, 0, False)
-        self.assertEqual(self.kb.layer_bits(), 1 << 3, "layer clamped to VIAL_LAYERS-1")
+        self.assertEqual(self.kb.layer_bits(), 1 << 7, "layer clamped to VIAL_LAYERS-1")
+
+    def test_layer_7_keycode(self):
+        """The store spans two sectors per copy, so the highest layer must
+        still resolve and survive a reboot."""
+        self.kb.set_keycode(7, ESC_ROW, ESC_COL, KC_A)
+        self.kb.reboot()
+        self.assertEqual(self.kb.get_keycode(7, ESC_ROW, ESC_COL), KC_A)
+        self.kb.set_keycode(0, FN_ROW, 0, QK_TO | 7)
+        self.kb.key_event(FN_ROW, 0, True)
+        self.kb.key_event(FN_ROW, 0, False)
+        self.kb.key_event(ESC_ROW, ESC_COL, True)
+        self.assertEqual(self.kb.report()[2], KC_A, "layer 7 must resolve through the store")
+        self.kb.key_event(ESC_ROW, ESC_COL, False)
 
     def test_fn_shift_selects_media_layer(self):
         """Fn+Shift raises the secondary Fn layer, whose number row carries the

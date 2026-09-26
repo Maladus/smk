@@ -51,20 +51,24 @@
 #    define KM_HOLD_FLAGS_DEFAULT   KM_FLAG_PERMISSIVE_HOLD
 
 _Static_assert(VIAL_LAYERS >= 1 && VIAL_LAYERS <= 16, "vial layer count must be 1..16");
-_Static_assert(VIAL_KEYMAP_TOTAL <= VIAL_KEYMAP_SECTOR_SIZE, "vial keymap store does not fit one flash sector");
 
-// Staging buffer for a whole sector. Only touched during init and writes; reads
+// Each keymap copy spans this many sectors; the store keeps two copies (A/B).
+#    define VIAL_KEYMAP_SPAN ((VIAL_KEYMAP_TOTAL + VIAL_KEYMAP_SECTOR_SIZE - 1) / VIAL_KEYMAP_SECTOR_SIZE)
+_Static_assert(VIAL_KEYMAP_TOTAL <= VIAL_KEYMAP_SPAN * VIAL_KEYMAP_SECTOR_SIZE, "vial keymap store must fit its sector span");
+
+// Staging buffer for a whole copy. Only touched during init and writes; reads
 // go straight to flash.
-static __xdata uint8_t keymap_sector[VIAL_KEYMAP_SECTOR_SIZE];
+static __xdata uint8_t keymap_sector[VIAL_KEYMAP_TOTAL];
 
 static uint8_t  active_sector;
 static bool     store_ready;
 static uint16_t tapping_term;
 static uint8_t  hold_flags;
 
-static uint16_t sector_addr(uint8_t idx)
+// Copy 0/1 base; each copy spans VIAL_KEYMAP_SPAN sectors.
+static uint16_t keymap_copy_addr(uint8_t idx)
 {
-    return (uint16_t)(VIAL_KEYMAP_ADDR + (uint16_t)idx * VIAL_KEYMAP_SECTOR_SIZE);
+    return (uint16_t)(VIAL_KEYMAP_ADDR + (uint16_t)idx * VIAL_KEYMAP_SPAN * VIAL_KEYMAP_SECTOR_SIZE);
 }
 
 // flash_read_into/program_from take a uint8_t length, so split long transfers.
@@ -142,7 +146,7 @@ static uint16_t payload_read(uint16_t idx)
 // and commit it.
 static void store_begin(void)
 {
-    keymap_read(sector_addr(active_sector), keymap_sector, VIAL_KEYMAP_TOTAL);
+    keymap_read(keymap_copy_addr(active_sector), keymap_sector, VIAL_KEYMAP_TOTAL);
 }
 
 static void store_commit(void)
@@ -154,8 +158,10 @@ static void store_commit(void)
     keymap_sector[KM_CKSUM_LO] = (uint8_t)(checksum & 0xFF);
     keymap_sector[KM_CKSUM_HI] = (uint8_t)(checksum >> 8);
 
-    flash_erase(FLASH_CODE, sector_addr(spare));
-    keymap_program(sector_addr(spare), keymap_sector, VIAL_KEYMAP_TOTAL);
+    for (uint8_t i = 0; i < VIAL_KEYMAP_SPAN; i++) {
+        flash_erase(FLASH_CODE, (uint16_t)(keymap_copy_addr(spare) + (uint16_t)i * VIAL_KEYMAP_SECTOR_SIZE));
+    }
+    keymap_program(keymap_copy_addr(spare), keymap_sector, VIAL_KEYMAP_TOTAL);
     active_sector = spare;
 }
 
@@ -789,7 +795,7 @@ void dynamic_keymap_init(void)
     bool    valid[2];
     uint8_t seq[2];
     for (uint8_t i = 0; i < 2; i++) {
-        keymap_read(sector_addr(i), keymap_sector, VIAL_KEYMAP_TOTAL);
+        keymap_read(keymap_copy_addr(i), keymap_sector, VIAL_KEYMAP_TOTAL);
         valid[i] = sector_valid(keymap_sector);
         seq[i]   = keymap_sector[KM_SEQ];
     }
