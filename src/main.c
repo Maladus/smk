@@ -18,6 +18,7 @@
 #include "sleep.h"
 #include "diag.h"
 #ifdef VIAL_ENABLE
+#    include "combo.h"
 #    include "tapping.h"
 #endif
 #ifdef DEBUG_SINK_UART
@@ -123,6 +124,7 @@ void main(void)
         matrix_task();
 #ifdef VIAL_ENABLE
         tapping_task();
+        combo_task();
 #endif
         indicators_render();
         usb_task();

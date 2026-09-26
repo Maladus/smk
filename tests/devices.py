@@ -286,17 +286,17 @@ class Air60Sim(UcsimSession):
         return the EP1 reports captured. This tests the report path itself,
         independent of the matrix; must be booted in USB mode first (so the
         report goes to EP1, not the RF link). Stages a return frame on the
-        firmware's stack so the function returns onto a NOP sled at 0x9000."""
+        firmware's stack so the function returns onto a NOP sled at 0xF000."""
         report = [0x00, 0x00] + (list(keys) + [0] * 6)[:6]
         base = 0x85
-        self.cmd("set mem rom 0x9000 " + " ".join(["0x00"] * 16))
+        self.cmd("set mem rom 0xF000 " + " ".join(["0x00"] * 16))
         self.cmd("set mem xram 0x%x %s"
                  % (self._a("keyboard_report"), " ".join("0x%02x" % b for b in report)))
         self.cmd("set mem iram 0x%x 0x00" % (base + 1))
-        self.cmd("set mem iram 0x%x 0x90" % (base + 2))     # return high byte -> 0x90xx
+        self.cmd("set mem iram 0x%x 0xF0" % (base + 2))     # return high byte -> 0x90xx
         self.set_sfr(0x81, base + 2)                        # SP
         self.cmd("pc 0x%x" % self._a("send_keyboard_report"))
-        self.brk(0x9000)
+        self.brk(0xF000)
         self.run()
         self.cmd("delete")
         return self.ep1_reports()
@@ -333,8 +333,8 @@ class Air60Sim(UcsimSession):
         USB interrupt. Returns (sp_before, sp_after, stopped_addr) so a test can
         check the 2-byte return-address push and the vector target (0x3b). Must
         be booted first (so EA / IEN1.EUSB are set by usb_init)."""
-        self.cmd("set mem rom 0x9000 " + " ".join(["0x00"] * 16))   # NOP sled
-        self.cmd("pc 0x9000")
+        self.cmd("set mem rom 0xF000 " + " ".join(["0x00"] * 16))   # NOP sled
+        self.cmd("pc 0xF000")
         pre = self.get_sfr(0x81)                       # SP before the IRQ
         self.set_sfr(0x92, 0x10)                       # USBIF1.SETUPIF
         self.brk(0x3b)
@@ -500,13 +500,13 @@ class Rk61Sim(UcsimSession):
     def park(self):
         """Cold-invoke user_sleep_prepare() (park_panel + INT4 wake arm) and
         return (P0, P4, P7) once it returns. A return frame is staged on the
-        firmware's stack so the function RETs onto a NOP sled at 0x9000."""
-        self.cmd("set mem rom 0x9000 " + " ".join(["0x00"] * 16))
+        firmware's stack so the function RETs onto a NOP sled at 0xF000."""
+        self.cmd("set mem rom 0xF000 " + " ".join(["0x00"] * 16))
         self.cmd("set mem iram 0x86 0x00")   # return low byte
-        self.cmd("set mem iram 0x87 0x90")   # return high byte -> 0x9000
+        self.cmd("set mem iram 0x87 0xF0")   # return high byte -> 0xF000
         self.set_sfr(0x81, 0x87)             # SP
         self.cmd("pc 0x%x" % self._a("user_sleep_prepare"))
-        self.brk(0x9000)
+        self.brk(0xF000)
         self.run()
         self.cmd("delete")
         return self.ports()
@@ -517,14 +517,14 @@ class Rk61Sim(UcsimSession):
 
     def call(self, addr):
         """Cold-invoke the C function at `addr` and return once it RETs onto a
-        NOP sled at 0x9000. The sled is re-staged each call, so a function can be
+        NOP sled at 0xF000. The sled is re-staged each call, so a function can be
         invoked repeatedly against the same session."""
-        self.cmd("set mem rom 0x9000 " + " ".join(["0x00"] * 16))
+        self.cmd("set mem rom 0xF000 " + " ".join(["0x00"] * 16))
         self.cmd("set mem iram 0x86 0x00")   # return low byte
-        self.cmd("set mem iram 0x87 0x90")   # return high byte -> 0x9000
+        self.cmd("set mem iram 0x87 0xF0")   # return high byte -> 0xF000
         self.set_sfr(0x81, 0x87)             # SP
         self.cmd("pc 0x%x" % addr)
-        self.brk(0x9000)
+        self.brk(0xF000)
         self.run()
         self.cmd("delete")
 
@@ -557,14 +557,14 @@ class Rk61Sim(UcsimSession):
         """Invoke user_battery_measure() with P0.0 staged high, flip P0.0 low after
         `flip_after` count-loop turns, and return (battery_level, low_power) from
         keyboard_state. The delay loops are patched to RET and a return frame is
-        staged so the function RETs onto the NOP sled at 0x9000."""
+        staged so the function RETs onto the NOP sled at 0xF000."""
         self.cmd("reset")
         self.cmd("set mem rom 0x%x 0x22" % self._a("delay_us"))   # RET
         self.cmd("set mem rom 0x%x 0x22" % self._a("delay_ms"))   # RET
         self.set_pin(P0, 0xFF)                # sense pin P0.0 idles high
-        self.cmd("set mem rom 0x9000 " + " ".join(["0x00"] * 16))
+        self.cmd("set mem rom 0xF000 " + " ".join(["0x00"] * 16))
         self.cmd("set mem iram 0x86 0x00")
-        self.cmd("set mem iram 0x87 0x90")
+        self.cmd("set mem iram 0x87 0xF0")
         self.set_sfr(0x81, 0x87)              # SP
         self.cmd("pc 0x%x" % self._a("user_battery_measure"))
 
@@ -575,7 +575,7 @@ class Rk61Sim(UcsimSession):
         self.set_pin(P0, 0xFE)                # flip P0.0 low; next check exits
         self.cmd("delete")                    # drop the loop breakpoint
 
-        self.brk(0x9000)
+        self.brk(0xF000)
         self.run()                            # loop exits; RETs onto the sled
         self.cmd("delete")
 

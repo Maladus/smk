@@ -17,6 +17,7 @@
 #include <stdbool.h>
 
 #ifdef VIAL_ENABLE
+#    include "combo.h"
 #    include "dynamic_keymap.h"
 #    include "tapping.h"
 #endif
@@ -104,6 +105,7 @@ void matrix_init()
         press_layer[i] = 0;
     }
     dynamic_keymap_init();
+    combo_init();
 #endif
 }
 
@@ -418,6 +420,13 @@ void matrix_tap_keycode(uint16_t keycode)
     dispatch_keycode(keycode, true);
     dispatch_keycode(keycode, false);
 }
+
+// Send a raw keycode without resolving a matrix position; used by the combo
+// engine to emit a combo output on press/release.
+void matrix_send_keycode(uint16_t keycode, bool pressed)
+{
+    dispatch_keycode(keycode, pressed);
+}
 #endif // VIAL_ENABLE
 
 static void process_key_state(uint8_t row, uint8_t col, bool pressed)
@@ -425,6 +434,10 @@ static void process_key_state(uint8_t row, uint8_t col, bool pressed)
 #ifdef VIAL_ENABLE
     const uint8_t  layer = pressed ? resolve_layer(row, col) : press_layer_get(row, col);
     const uint16_t kc    = KEYMAP_GET(layer, row, col);
+
+    if (combo_process_record(row, col, kc, pressed)) {
+        return;
+    }
 
     if (tapping_process_record(row, col, kc, pressed)) {
         return;

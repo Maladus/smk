@@ -54,6 +54,8 @@
 #    define CMD_VIAL_DYNAMIC_ENTRY_OP   0x0D
 
 #    define VIAL_DYNAMIC_ENTRY_GET_NUMBER_OF_ENTRIES 0x00
+#    define VIAL_DYNAMIC_ENTRY_COMBO_GET             0x03
+#    define VIAL_DYNAMIC_ENTRY_COMBO_SET             0x04
 
 #    define VIA_UNHANDLED 0xFF
 
@@ -265,14 +267,63 @@ static void vial_qmk_settings_reset(void)
     dynamic_keymap_reset_settings();
 }
 
-// id_dynamic_entry_op: sub-op GET_NUMBER_OF_ENTRIES replies with zero entries.
+// id_dynamic_entry_op: sub-op at in[2], entry index at in[3]. The counts reply
+// (out[0..3]) mirrors vial-qmk: tap dance / combo / key override / alt repeat,
+// with the feature bits in the last byte.
+static void vial_combo_to_bytes(const vial_combo_entry_t *e, uint8_t *p)
+{
+    for (uint8_t i = 0; i < 4; i++) {
+        p[i * 2]     = (uint8_t)(e->input[i] >> 8);
+        p[i * 2 + 1] = (uint8_t)(e->input[i] & 0xFF);
+    }
+    p[8] = (uint8_t)(e->output >> 8);
+    p[9] = (uint8_t)(e->output & 0xFF);
+}
+
+static void vial_combo_from_bytes(vial_combo_entry_t *e, const uint8_t *p)
+{
+    for (uint8_t i = 0; i < 4; i++) {
+        e->input[i] = (uint16_t)(((uint16_t)p[i * 2] << 8) | p[i * 2 + 1]);
+    }
+    e->output = (uint16_t)(((uint16_t)p[8] << 8) | p[9]);
+}
+
 static void vial_dynamic_entry_op(const uint8_t *in, uint8_t *out)
 {
-    if (in[2] != VIAL_DYNAMIC_ENTRY_GET_NUMBER_OF_ENTRIES) {
-        return; // echo the request unchanged, like the reference
-    }
-    for (uint8_t i = 0; i < VIAL_REPORT_SIZE; i++) {
-        out[i] = 0;
+    switch (in[2]) {
+        case VIAL_DYNAMIC_ENTRY_GET_NUMBER_OF_ENTRIES:
+            for (uint8_t i = 0; i < VIAL_REPORT_SIZE; i++) {
+                out[i] = 0;
+            }
+            out[0] = 0;                            // tap dance entries
+            out[1] = dynamic_keymap_combo_count(); // combo entries
+            out[2] = 0;                            // key override entries
+            out[3] = 0;                            // alt repeat key entries
+            return;
+
+        case VIAL_DYNAMIC_ENTRY_COMBO_GET: {
+            vial_combo_entry_t entry;
+            const uint8_t      status = (uint8_t)dynamic_keymap_get_combo(in[3], &entry);
+            out[0]                    = status;
+            if (status == 0) {
+                vial_combo_to_bytes(&entry, out + 1);
+            } else {
+                for (uint8_t i = 1; i <= 10; i++) {
+                    out[i] = 0;
+                }
+            }
+            return;
+        }
+
+        case VIAL_DYNAMIC_ENTRY_COMBO_SET: {
+            vial_combo_entry_t entry;
+            vial_combo_from_bytes(&entry, in + 4);
+            out[0] = (uint8_t)dynamic_keymap_set_combo(in[3], &entry);
+            return;
+        }
+
+        default:
+            return; // echo the request unchanged, like the reference
     }
 }
 

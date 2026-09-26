@@ -31,6 +31,8 @@ keyboards += {
                     'serial' : 'vial:f64c2b3c',
                     'vial_layers' : 4,
                     'vial_keymap_sectors' : 2,
+                    'vial_entry_sectors' : 2,
+                    'vial_combo_entries' : 8,
                 },
             },
         },

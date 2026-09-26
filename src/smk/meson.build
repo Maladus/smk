@@ -15,4 +15,5 @@ src_smk += files(
     'vial.c',
     'dynamic_keymap.c',
     'tapping.c',
+    'combo.c',
 )

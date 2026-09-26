@@ -20,6 +20,7 @@ bool matrix_is_on(uint8_t row, uint8_t col);
 // Layer engine hooks used by the tapping engine.
 void matrix_process_key(uint8_t row, uint8_t col, bool pressed);
 void matrix_tap_keycode(uint16_t keycode);
+void matrix_send_keycode(uint16_t keycode, bool pressed);
 void matrix_layer_activate(uint8_t layer);
 void matrix_layer_deactivate(uint8_t layer);
 void matrix_layer_toggle(uint8_t layer);

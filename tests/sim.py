@@ -187,7 +187,7 @@ class Sim:
     WDOF = 0x80  # RSTSTAT.WDOF: the last reset was the watchdog
     ISP_BOOTLOADER = 0xFF00  # isp_jump() does: clr EA; B=0xa5; A=0x5a; ljmp 0xff00
     ISP_MAGIC_ACC, ISP_MAGIC_B = 0x5A, 0xA5
-    SLED_END = 0x900E  # break address at the end of the 16-byte NOP sled
+    SLED_END = 0xF00E  # break address at the end of the 16-byte NOP sled
 
     STATE_DEFAULT, STATE_ADDRESSED, STATE_CONFIGURED = 0, 1, 2
 
@@ -306,7 +306,7 @@ class Sim:
         return [
             self._set_xram(self.EP0_OUT_BUF, setup),
             f"set mem sfr 0x{self.USBIF1:x} 0x{self.SETUPIF:02x}",
-            "pc 0x9000",
+            "pc 0xF000",
             f"break 0x{self.SLED_END:x}",
             "run",
         ]
@@ -338,7 +338,7 @@ class Sim:
             # OUT data stage -> usb_ep0_out_irq (LED branch) -> led_state = buf[0]
             self._set_xram(self.EP0_OUT_BUF, [value]),
             f"set mem sfr 0x{self.USBIF2:x} 0x{self.OEP0IF:02x}",
-            "pc 0x9000",
+            "pc 0xF000",
             f"break 0x{self.SLED_END:x}",
             "run",
             f"dump xram 0x{self.LED_STATE:x} 0x{self.LED_STATE:x}",
@@ -372,8 +372,8 @@ class Sim:
             f"break 0x{self.POST_INIT:x}",
             "run",
             "delete",  # clear the post-init breakpoint
-            "set mem rom 0x9000 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0",
-            "pc 0x9000",
+            "set mem rom 0xF000 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0",
+            "pc 0xF000",
         ]
 
     def boot_post_init_state(self):
@@ -407,11 +407,11 @@ class Sim:
         and halts. Returns sim output."""
         cmds = [
             "reset",
-            "set mem rom 0x9000 0xc0 0xe0 0x80 0xfc",  # loop: PUSH ACC; SJMP $-2
+            "set mem rom 0xF000 0xc0 0xe0 0x80 0xfc",  # loop: PUSH ACC; SJMP $-2
             f"set mem sfr 0xe0 0x{marker:02x}",        # ACC = marker byte
             "set mem iram 0x00 0x00",                  # clear register-bank-0 byte R0
             "set mem sfr 0x81 0x85",                   # SP = firmware stack base
-            "pc 0x9000",
+            "pc 0xF000",
             "run",                                     # uCsim halts at the overflow
             "dump sfr 0x81 0x81",
             "dump iram 0x00 0x00",
@@ -442,7 +442,7 @@ class Sim:
             # and reaches the break (rather than sliding past it).
             self._set_xram(self.EP0_OUT_BUF, out_data),
             f"set mem sfr 0x{self.USBIF2:x} 0x{self.OEP0IF:02x}",
-            "pc 0x9000",
+            "pc 0xF000",
             f"break 0x{phase2_break:x}",
             "run",
         ]

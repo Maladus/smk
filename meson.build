@@ -152,19 +152,33 @@ foreach keyboard, board : keyboards
             code_size = settings_addr
             if vial
                 vial_keymap_sectors = options.get('vial_keymap_sectors', 2)
+                vial_entry_sectors = options.get('vial_entry_sectors', 0)
+                vial_combo_entries = options.get('vial_combo_entries', 0)
                 vial_layers = options.get('vial_layers', 4)
                 if vial_layers < 1 or vial_layers > 16
                     error(
                         'vial_layers for layout @0@ of keyboard @1@ must be between 1 and 16, got @2@'.format(layout, keyboard, vial_layers),
                     )
                 endif
-                vial_keymap_addr = settings_addr - vial_keymap_sectors * spec['sector_size']
+                if vial_combo_entries > 0 and vial_entry_sectors < 2
+                    error(
+                        'vial_combo_entries for layout @0@ of keyboard @1@ needs at least 2 vial_entry_sectors (A/B), got @2@'.format(layout, keyboard, vial_entry_sectors),
+                    )
+                endif
+                # The dynamic-entry store sits between the keymap store and the
+                # settings sector; both grow downward from settings_addr.
+                vial_keymap_addr = settings_addr - (vial_keymap_sectors + vial_entry_sectors) * spec['sector_size']
+                vial_entry_addr = vial_keymap_addr + vial_keymap_sectors * spec['sector_size']
                 code_size = vial_keymap_addr
                 platform_cc_args += [
                     '-DVIAL_ENABLE=1',
                     '-DVIAL_KEYMAP_ADDR=@0@u'.format(vial_keymap_addr),
                     '-DVIAL_LAYERS=@0@'.format(vial_layers),
+                    '-DVIAL_COMBO_ENTRIES=@0@'.format(vial_combo_entries),
                 ]
+                if vial_entry_sectors > 0
+                    platform_cc_args += ['-DVIAL_ENTRY_ADDR=@0@u'.format(vial_entry_addr)]
+                endif
             endif
             platform_cc_args += [
                 '--code-size',

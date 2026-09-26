@@ -68,8 +68,12 @@ ESC_ROW, ESC_COL = 0, 0
 MATRIX_COLS = 14
 
 KC_A = 0x0004
+KC_J = 0x000D
+KC_K = 0x000E
+KC_L = 0x000F
 KC_Q = 0x0014
 KC_1 = 0x001E
+KC_ENTER = 0x0028
 KC_ESC = 0x0029
 KC_TAB = 0x002B
 KC_SPC = 0x002C
@@ -96,17 +100,20 @@ RAW_HID_REPORT_SIZE = 32
 EP1_BUF_SIZE = 16
 EP2_BUF_SIZE = 64
 
-# The two 512-byte keymap sectors (VIAL_KEYMAP_ADDR = settings - 2*sector).
-# Only needed to invalidate a store when a test wants the seeded defaults.
-KEYMAP_SECTORS = (0xE800, 0xEA00)
+# The two 512-byte keymap sectors and the dynamic-entry (combo) sectors. The
+# keymap store sits at VIAL_KEYMAP_ADDR (0xE400), the combo store at
+# VIAL_ENTRY_ADDR (0xE800); settings follow at 0xEC00. Only needed to
+# invalidate a store when a test wants the seeded defaults.
+KEYMAP_SECTORS = (0xE400, 0xE600)
+ENTRY_SECTORS = (0xE800, 0xEA00)
 
 # Simulator SFR / sled addresses (see tests/sim.py).
 USBIF1, USBIF2 = 0x92, 0x93
 SETUPIF = 0x10
 OEP0IF = 0x10
 EP0_OUT_BUF = 0x1100
-SLED = 0x9000
-SLED_END = 0x900E
+SLED = 0xF000
+SLED_END = 0xF00E
 
 USB_DESC_CLASS_HID = 0x21
 USB_DESC_CLASS_REPORT = 0x22
@@ -391,6 +398,26 @@ class VialSim(Rk61Sim):
 
     def tapping_task(self):
         self.call(self.sym["tapping_task"])
+
+    def combo_task(self):
+        self.call(self.sym["combo_task"])
+
+    # --- dynamic-entry (combo) protocol ----------------------------------
+    def combo_count(self):
+        return self.vial([0xFE, 0x0D, 0x00])[1]
+
+    def set_combo(self, index, inputs, output):
+        payload = []
+        for kc in (list(inputs) + [0, 0, 0, 0])[:4]:
+            payload += [(kc >> 8) & 0xFF, kc & 0xFF]
+        payload += [(output >> 8) & 0xFF, output & 0xFF]
+        return self.vial([0xFE, 0x0D, 0x04, index] + payload)[0]
+
+    def get_combo(self, index):
+        out = self.vial([0xFE, 0x0D, 0x03, index])
+        inputs = [(out[1 + i * 2] << 8) | out[2 + i * 2] for i in range(4)]
+        output = (out[9] << 8) | out[10]
+        return out[0], inputs, output
 
     # --- report capture ---------------------------------------------------
     def ep1_reports(self):
@@ -1011,6 +1038,87 @@ class TestVialOneShotMod(unittest.TestCase):
         self.assertEqual(self.kb.report()[0], 0x20)
         self.kb.key_event(0, 1, False)
         self.assertEqual(self.kb.report()[0], 0)
+
+
+# --- combos (dynamic-entry plumbing) ---------------------------------------
+
+
+class TestVialCombos(unittest.TestCase):
+    """Vial combos over the dynamic-entry command: J+K+L -> Enter."""
+
+    J, K, L = (2, 7), (2, 8), (2, 9)
+
+    def setUp(self):
+        self.kb = VialSim()
+        self.kb.boot_usb()
+
+    def tearDown(self):
+        self.kb.close()
+
+    def test_entry_count(self):
+        self.assertEqual(self.kb.combo_count(), 8)
+
+    def test_combo_get_set_roundtrip(self):
+        self.assertEqual(self.kb.set_combo(0, [KC_J, KC_K, KC_L], KC_ENTER), 0)
+        status, inputs, output = self.kb.get_combo(0)
+        self.assertEqual(status, 0)
+        self.assertEqual(inputs, [KC_J, KC_K, KC_L, 0])
+        self.assertEqual(output, KC_ENTER)
+
+    def test_combo_survives_reboot(self):
+        self.kb.set_combo(0, [KC_J, KC_K, KC_L], KC_ENTER)
+        self.kb.reboot()
+        status, _inputs, output = self.kb.get_combo(0)
+        self.assertEqual(status, 0)
+        self.assertEqual(output, KC_ENTER)
+
+    def test_jkl_emits_enter(self):
+        self.kb.set_combo(0, [KC_J, KC_K, KC_L], KC_ENTER)
+        self.kb.set_tick(0)
+        self.kb.key_event(*self.J, True)
+        self.kb.key_event(*self.K, True)
+        self.kb.key_event(*self.L, True)
+        self.assertEqual(self.kb.report()[2], KC_ENTER, "the chord must emit Enter")
+        self.kb.key_event(*self.L, False)
+        self.assertEqual(self.kb.report()[2], 0, "releasing a source key releases the output")
+
+    def test_lone_key_passes_after_term(self):
+        self.kb.set_combo(0, [KC_J, KC_K, KC_L], KC_ENTER)
+        self.kb.set_tick(0)
+        self.kb.key_event(*self.J, True)
+        self.kb.set_tick(100)
+        self.kb.combo_task()
+        self.assertEqual(self.kb.report()[2], KC_J, "a lone combo key must still type")
+        self.kb.key_event(*self.J, False)
+        self.assertEqual(self.kb.report()[2], 0)
+
+    def test_partial_combo_does_not_fire(self):
+        self.kb.set_combo(0, [KC_J, KC_K, KC_L], KC_ENTER)
+        self.kb.set_tick(0)
+        self.kb.key_event(*self.J, True)
+        self.kb.key_event(*self.K, True)
+        self.kb.set_tick(100)
+        self.kb.combo_task()
+        reports = self.kb.ep1_reports()
+        self.assertTrue(any(KC_J in r for r in reports), "J must be reported")
+        self.assertTrue(any(KC_K in r for r in reports), "K must be reported")
+        self.assertFalse(any(KC_ENTER in r for r in reports), "an incomplete chord must not fire")
+        self.kb.key_event(*self.J, False)
+        self.kb.key_event(*self.K, False)
+
+    def test_other_key_flushes_pending_chord(self):
+        """A key outside the combo decides the chord: the buffered source key
+        types normally and the combo does not fire."""
+        self.kb.set_combo(0, [KC_J, KC_K, KC_L], KC_ENTER)
+        self.kb.set_tick(0)
+        self.kb.key_event(*self.J, True)  # buffered
+        self.kb.key_event(2, 1, True)     # A: not in the combo
+        reports = self.kb.ep1_reports()
+        self.assertTrue(any(KC_J in r for r in reports), "J must be flushed")
+        self.assertTrue(any(KC_A in r for r in reports), "A must be typed")
+        self.assertFalse(any(KC_ENTER in r for r in reports), "the chord must not fire")
+        self.kb.key_event(*self.J, False)
+        self.kb.key_event(2, 1, False)
 
 
 # --- EP1 report protocol ---------------------------------------------------

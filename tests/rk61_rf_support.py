@@ -25,14 +25,14 @@ class Rk61RfSim(Rk61Sim):
 
     def call(self, addr):
         """Cold-invoke the C function at `addr` and return once it RETs onto a
-        NOP sled at 0x9000. The sled is re-staged each call, so a function can be
+        NOP sled at 0xF000. The sled is re-staged each call, so a function can be
         invoked repeatedly against the same session."""
-        self.cmd("set mem rom 0x9000 " + " ".join(["0x00"] * 16))
+        self.cmd("set mem rom 0xF000 " + " ".join(["0x00"] * 16))
         self.cmd("set mem iram 0x86 0x00")   # return low byte
-        self.cmd("set mem iram 0x87 0x90")   # return high byte -> 0x9000
+        self.cmd("set mem iram 0x87 0xF0")   # return high byte -> 0xF000
         self.set_sfr(0x81, 0x87)             # SP
         self.cmd("pc 0x%x" % addr)
-        self.brk(0x9000)
+        self.brk(0xF000)
         self.run()
         self.cmd("delete")
 
@@ -56,16 +56,16 @@ class Rk61RfSim(Rk61Sim):
         self.set_pin(P5, (cur | 0x20) if on else (cur & ~0x20))
 
     def cold_call(self, addr, slave=None, dpl=None, dph=None, b=None, stack_arg=None):
-        """Cold-invoke `addr` and return once it RETs onto the 0x9000 sled,
+        """Cold-invoke `addr` and return once it RETs onto the 0xF000 sled,
         servicing `slave`'s SPI breakpoints in between. The SDCC stack-auto frame
         puts a single stack argument at 0x85, below the return address at
         0x86/0x87; a first pointer/16-bit argument is passed in DPL/DPH, and a
         generic pointer's memory-space byte in B (0x00 = xdata)."""
-        self.cmd("set mem rom 0x9000 " + " ".join(["0x00"] * 16))
+        self.cmd("set mem rom 0xF000 " + " ".join(["0x00"] * 16))
         if stack_arg is not None:
             self.cmd("set mem iram 0x85 0x%02x" % (stack_arg & 0xFF))
         self.cmd("set mem iram 0x86 0x00")   # return low byte
-        self.cmd("set mem iram 0x87 0x90")   # return high byte -> 0x9000
+        self.cmd("set mem iram 0x87 0xF0")   # return high byte -> 0xF000
         self.set_sfr(0x81, 0x87)             # SP
         if dpl is not None:
             self.set_sfr(0x82, dpl & 0xFF)
@@ -75,20 +75,20 @@ class Rk61RfSim(Rk61Sim):
             self.set_sfr(0xF0, b & 0xFF)
         self.cmd("pc 0x%x" % addr)
         if slave is None:
-            self.brk(0x9000)
+            self.brk(0xF000)
             self.run()
             self.cmd("delete")
             return
 
         # Keep the slave's breakpoints; add a numbered return breakpoint so only
         # it is removed when the call finishes.
-        out = self.cmd("break 0x9000")
+        out = self.cmd("break 0xF000")
         m = re.search(r"Breakpoint (\d+)", out)
         nr = int(m.group(1)) if m else None
         while True:
             out = self.run()
             stop = self.stopped_at(out)
-            if stop == 0x9000:
+            if stop == 0xF000:
                 break
             slave.service(stop)
         self.cmd("delete %d" % nr if nr is not None else "delete")

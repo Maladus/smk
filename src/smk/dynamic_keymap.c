@@ -211,6 +211,205 @@ static void seed_defaults(void)
     store_ready = true;
 }
 
+// --- dynamic-entry store (Vial combos) ------------------------------------
+//
+// A separate A/B flash sector pair below the keymap store holds the combo
+// table: a small header (magic, version, count, sequence, checksum) followed by
+// VIAL_COMBO_ENTRIES entries of 10 bytes each (four input keycodes + output).
+// Writes stage a new copy into the spare sector and switch to it, exactly like
+// the keymap store.
+#    if VIAL_COMBO_ENTRIES > 0
+#        ifndef VIAL_ENTRY_ADDR
+#            error "vial combos need VIAL_ENTRY_ADDR (set vial_entry_sectors in meson)"
+#        endif
+
+#        define VIAL_ENTRY_MAGIC0      0x45u // 'E'
+#        define VIAL_ENTRY_MAGIC1      0x4Eu // 'N'
+#        define VIAL_ENTRY_VERSION     1u
+#        define VIAL_ENTRY_HEADER_SIZE 16u
+#        define VIAL_COMBO_ENTRY_SIZE  10u
+#        define VIAL_ENTRY_PAYLOAD     ((uint16_t)VIAL_COMBO_ENTRIES * VIAL_COMBO_ENTRY_SIZE)
+#        define VIAL_ENTRY_TOTAL       (VIAL_ENTRY_HEADER_SIZE + VIAL_ENTRY_PAYLOAD)
+
+#        define EN_MAGIC0   0u
+#        define EN_MAGIC1   1u
+#        define EN_VERSION  2u
+#        define EN_COUNT    3u
+#        define EN_SEQ      4u
+#        define EN_CKSUM_LO 5u
+#        define EN_CKSUM_HI 6u
+#        define EN_PAYLOAD  VIAL_ENTRY_HEADER_SIZE
+
+_Static_assert(VIAL_ENTRY_TOTAL <= VIAL_KEYMAP_SECTOR_SIZE, "vial entry store does not fit one flash sector");
+_Static_assert(VIAL_COMBO_ENTRY_SIZE == sizeof(vial_combo_entry_t), "vial combo entry size must match the wire format");
+
+static __xdata uint8_t entry_sector[VIAL_ENTRY_TOTAL];
+static uint8_t         entry_active_sector;
+static bool            entry_ready;
+
+static uint16_t entry_sector_addr(uint8_t idx)
+{
+    return (uint16_t)(VIAL_ENTRY_ADDR + (uint16_t)idx * VIAL_KEYMAP_SECTOR_SIZE);
+}
+
+static uint16_t entry_checksum(const __xdata uint8_t *buf)
+{
+    uint16_t sum = 0;
+    for (uint16_t i = 0; i < VIAL_ENTRY_TOTAL; i++) {
+        uint8_t b = (i == EN_CKSUM_LO || i == EN_CKSUM_HI) ? 0 : buf[i];
+        sum += b;
+    }
+    return sum;
+}
+
+static bool entry_valid(const __xdata uint8_t *buf)
+{
+    if (buf[EN_MAGIC0] != VIAL_ENTRY_MAGIC0 || buf[EN_MAGIC1] != VIAL_ENTRY_MAGIC1) {
+        return false;
+    }
+    if (buf[EN_VERSION] != VIAL_ENTRY_VERSION || buf[EN_COUNT] != VIAL_COMBO_ENTRIES) {
+        return false;
+    }
+    const uint16_t stored = (uint16_t)(buf[EN_CKSUM_LO] | ((uint16_t)buf[EN_CKSUM_HI] << 8));
+    return entry_checksum(buf) == stored;
+}
+
+static void entry_begin(void)
+{
+    keymap_read(entry_sector_addr(entry_active_sector), entry_sector, VIAL_ENTRY_TOTAL);
+}
+
+static void entry_commit(void)
+{
+    const uint8_t spare = entry_active_sector ^ 1u;
+
+    entry_sector[EN_SEQ]++;
+    const uint16_t checksum   = entry_checksum(entry_sector);
+    entry_sector[EN_CKSUM_LO] = (uint8_t)(checksum & 0xFF);
+    entry_sector[EN_CKSUM_HI] = (uint8_t)(checksum >> 8);
+
+    flash_erase(FLASH_CODE, entry_sector_addr(spare));
+    keymap_program(entry_sector_addr(spare), entry_sector, VIAL_ENTRY_TOTAL);
+    entry_active_sector = spare;
+}
+
+static void entry_seed_defaults(void)
+{
+    for (uint16_t i = 0; i < VIAL_ENTRY_TOTAL; i++) {
+        entry_sector[i] = 0;
+    }
+    entry_sector[EN_MAGIC0]  = VIAL_ENTRY_MAGIC0;
+    entry_sector[EN_MAGIC1]  = VIAL_ENTRY_MAGIC1;
+    entry_sector[EN_VERSION] = VIAL_ENTRY_VERSION;
+    entry_sector[EN_COUNT]   = VIAL_COMBO_ENTRIES;
+    entry_sector[EN_SEQ]     = 0;
+    entry_active_sector      = 1; // entry_commit() writes the spare, so sector 0
+    entry_commit();
+    entry_ready = true;
+}
+
+static void dynamic_entry_init(void)
+{
+    entry_ready         = false;
+    entry_active_sector = 0;
+
+    bool    valid[2];
+    uint8_t seq[2];
+    for (uint8_t i = 0; i < 2; i++) {
+        keymap_read(entry_sector_addr(i), entry_sector, VIAL_ENTRY_TOTAL);
+        valid[i] = entry_valid(entry_sector);
+        seq[i]   = entry_sector[EN_SEQ];
+    }
+
+    int8_t pick = -1;
+    if (valid[0] && valid[1]) {
+        pick = ((int8_t)(seq[1] - seq[0]) > 0) ? 1 : 0;
+    } else if (valid[0]) {
+        pick = 0;
+    } else if (valid[1]) {
+        pick = 1;
+    }
+
+    if (pick < 0) {
+        entry_seed_defaults();
+        return;
+    }
+
+    entry_active_sector = (uint8_t)pick;
+    entry_begin();
+    entry_ready = true;
+}
+
+static void combo_read(uint8_t index, vial_combo_entry_t *entry)
+{
+    const uint16_t off = (uint16_t)(EN_PAYLOAD + (uint16_t)index * VIAL_COMBO_ENTRY_SIZE);
+    for (uint8_t i = 0; i < 4; i++) {
+        entry->input[i] = (uint16_t)(((uint16_t)entry_sector[off + i * 2] << 8) | entry_sector[off + i * 2 + 1]);
+    }
+    entry->output = (uint16_t)(((uint16_t)entry_sector[off + 8] << 8) | entry_sector[off + 9]);
+}
+
+static void combo_write(uint8_t index, const vial_combo_entry_t *entry)
+{
+    const uint16_t off = (uint16_t)(EN_PAYLOAD + (uint16_t)index * VIAL_COMBO_ENTRY_SIZE);
+    for (uint8_t i = 0; i < 4; i++) {
+        entry_sector[off + i * 2]     = (uint8_t)(entry->input[i] >> 8);
+        entry_sector[off + i * 2 + 1] = (uint8_t)(entry->input[i] & 0xFF);
+    }
+    entry_sector[off + 8] = (uint8_t)(entry->output >> 8);
+    entry_sector[off + 9] = (uint8_t)(entry->output & 0xFF);
+}
+
+uint8_t dynamic_keymap_combo_count(void)
+{
+    return VIAL_COMBO_ENTRIES;
+}
+
+int dynamic_keymap_get_combo(uint8_t index, vial_combo_entry_t *entry)
+{
+    if (!entry_ready || index >= VIAL_COMBO_ENTRIES) {
+        return 1;
+    }
+    combo_read(index, entry);
+    return 0;
+}
+
+int dynamic_keymap_set_combo(uint8_t index, const vial_combo_entry_t *entry)
+{
+    if (!entry_ready || index >= VIAL_COMBO_ENTRIES) {
+        return 1;
+    }
+    entry_begin();
+    combo_write(index, entry);
+    entry_commit();
+    return 0;
+}
+
+#    else // VIAL_COMBO_ENTRIES == 0
+
+static void dynamic_entry_init(void) {}
+
+uint8_t dynamic_keymap_combo_count(void)
+{
+    return 0;
+}
+
+int dynamic_keymap_get_combo(uint8_t index, vial_combo_entry_t *entry)
+{
+    (void)index;
+    (void)entry;
+    return 1;
+}
+
+int dynamic_keymap_set_combo(uint8_t index, const vial_combo_entry_t *entry)
+{
+    (void)index;
+    (void)entry;
+    return 1;
+}
+
+#    endif // VIAL_COMBO_ENTRIES
+
 void dynamic_keymap_init(void)
 {
     store_ready   = false;
@@ -236,16 +435,17 @@ void dynamic_keymap_init(void)
 
     if (pick < 0) {
         seed_defaults();
-        return;
+    } else {
+        active_sector = (uint8_t)pick;
+        store_begin();
+        const uint8_t base = keymap_sector[KM_BASE];
+        set_default_layer(base < VIAL_LAYERS ? base : 0);
+        tapping_term = (uint16_t)(keymap_sector[KM_TERM_LO] | ((uint16_t)keymap_sector[KM_TERM_HI] << 8));
+        hold_flags   = keymap_sector[KM_FLAGS];
+        store_ready  = true;
     }
 
-    active_sector = (uint8_t)pick;
-    store_begin();
-    const uint8_t base = keymap_sector[KM_BASE];
-    set_default_layer(base < VIAL_LAYERS ? base : 0);
-    tapping_term = (uint16_t)(keymap_sector[KM_TERM_LO] | ((uint16_t)keymap_sector[KM_TERM_HI] << 8));
-    hold_flags   = keymap_sector[KM_FLAGS];
-    store_ready  = true;
+    dynamic_entry_init();
 }
 
 uint16_t dynamic_keymap_get(uint8_t layer, uint8_t row, uint8_t col)
