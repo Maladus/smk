@@ -1417,9 +1417,18 @@ enum keycode_aliases {
 #define TT(layer) (QK_LAYER_TAP_TOGGLE | ((layer)&0x1F))
 #define QK_LAYER_TAP_TOGGLE_GET_LAYER(kc) ((kc)&0x1F)
 
+// Mod-tap: hold for the modifier, tap for the keycode. Mod is 5 bits.
+#define MT(mod, kc) (QK_MOD_TAP | (((mod)&0x1F) << 8) | ((kc)&0xFF))
+#define QK_MOD_TAP_GET_MODS(kc) (((kc) >> 8) & 0x1F)
+#define QK_MOD_TAP_GET_TAP_KEYCODE(kc) ((kc)&0xFF)
+
 // One-shot layer: active until the next key is released.
 #define OSL(layer) (QK_ONE_SHOT_LAYER | ((layer)&0x1F))
 #define QK_ONE_SHOT_LAYER_GET_LAYER(kc) ((kc)&0x1F)
+
+// One-shot mod: applies the modifier to the next key only. Mod is 5 bits.
+#define OSM(mod) (QK_ONE_SHOT_MOD | ((mod)&0x1F))
+#define QK_ONE_SHOT_MOD_GET_MODS(kc) ((kc)&0x1F)
 
 // Layer mod: hold for the layer and the modifier together. Layer is 4 bits.
 #define LM(layer, mod) (QK_LAYER_MOD | (((layer)&0xF) << 8) | ((mod)&0x1F))
@@ -1481,6 +1490,12 @@ enum keycode_aliases {
 #define IS_USER_KEYCODE(code) ((code) >= QK_USER_0 && (code) <= QK_USER_31)
 
 #define MOD_BIT(code) (1 << ((code)&0x07))
+
+// MT/OSM encode the modifier in QMK's 5-bit packed form (bit 4 is the
+// right-hand flag). add_mods/del_mods want the 8-bit report bitmask, so a
+// right-handed mod shifts its low nibble up (matches QMK's
+// `(mod & 0x10) ? mod << 4 : mod`).
+#define MODS_5BIT_TO_8BIT(mod) ((uint8_t)(((mod)&0x10) ? ((mod) << 4) : (mod)))
 
 // Used for SHIFT_ESC
 #define MODS_SHIFT_MASK (MOD_BIT(KC_LSFT)|MOD_BIT(KC_RSFT))

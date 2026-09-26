@@ -60,6 +60,12 @@ static uint8_t osl_layer = 0xFF;
 static uint8_t osl_used;
 static uint8_t osl_row;
 static uint8_t osl_col;
+
+// One-shot mod (OSM): applies the modifier until the next key is released.
+static uint8_t osm_mods;
+static uint8_t osm_used;
+static uint8_t osm_row;
+static uint8_t osm_col;
 #endif
 
 // Recovery check for the boot path: true when the top-left key (R0/C0) is held
@@ -92,6 +98,8 @@ void matrix_init()
     layer_state = 0;
     osl_layer   = 0xFF;
     osl_used    = 0;
+    osm_mods    = 0;
+    osm_used    = 0;
     for (uint8_t i = 0; i < VIAL_PRESS_BYTES; i++) {
         press_layer[i] = 0;
     }
@@ -246,6 +254,40 @@ static void osl_update(uint8_t row, uint8_t col, bool pressed)
     }
 }
 
+static void osm_activate(uint8_t mods)
+{
+    if (osm_mods) {
+        del_mods(MODS_5BIT_TO_8BIT(osm_mods));
+    }
+    osm_mods = mods;
+    osm_used = 0;
+    add_mods(MODS_5BIT_TO_8BIT(osm_mods));
+    send_keyboard_report();
+}
+
+// Consume the one-shot mod on the first key press, then clear it when that key
+// is released. The OSM key itself is handled by handle_layer_keycode.
+static void osm_update(uint8_t row, uint8_t col, bool pressed)
+{
+    if (!osm_mods) {
+        return;
+    }
+    if (!osm_used) {
+        if (pressed) {
+            osm_used = 1;
+            osm_row  = row;
+            osm_col  = col;
+        }
+        return;
+    }
+    if (!pressed && row == osm_row && col == osm_col) {
+        del_mods(MODS_5BIT_TO_8BIT(osm_mods));
+        osm_mods = 0;
+        osm_used = 0;
+        send_keyboard_report();
+    }
+}
+
 // Layer keycodes act on the layer state and never reach the host.
 static bool handle_layer_keycode(uint16_t kc, bool pressed)
 {
@@ -309,6 +351,13 @@ static bool handle_layer_keycode(uint16_t kc, bool pressed)
         return true;
     }
 
+    if (IS_QK_ONE_SHOT_MOD(kc)) {
+        if (pressed) {
+            osm_activate(QK_ONE_SHOT_MOD_GET_MODS(kc));
+        }
+        return true;
+    }
+
     return false;
 }
 
@@ -359,6 +408,7 @@ void matrix_process_key(uint8_t row, uint8_t col, bool pressed)
 #    endif
 
     osl_update(row, col, pressed);
+    osm_update(row, col, pressed);
     dispatch_keycode(kc, pressed);
 }
 

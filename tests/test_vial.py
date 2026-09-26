@@ -76,9 +76,14 @@ KC_SPC = 0x002C
 KC_GRV = 0x0035
 KC_LEFT = 0x0050
 
+# Modifier bits (report.h / keycodes.h): bit 1 is Left Shift.
+MOD_LSFT = 0x02
+
+QK_MOD_TAP = 0x2000
 QK_TO = 0x5200
 QK_DF = 0x5240
 QK_TG = 0x5260
+QK_ONE_SHOT_MOD = 0x52A0
 QK_PDF = 0x52E0
 QK_LAYER_TAP = 0x4000
 QK_LAYER_MOD = 0x5000
@@ -92,7 +97,7 @@ EP1_BUF_SIZE = 16
 EP2_BUF_SIZE = 64
 
 # The two 512-byte keymap sectors (VIAL_KEYMAP_ADDR = settings - 2*sector).
-# Only needed to invalidate the store when a test wants the seeded defaults.
+# Only needed to invalidate a store when a test wants the seeded defaults.
 KEYMAP_SECTORS = (0xE800, 0xEA00)
 
 # Simulator SFR / sled addresses (see tests/sim.py).
@@ -921,6 +926,91 @@ class TestVialTapHold(unittest.TestCase):
         out = self.kb.vial([0xFE, 0x0A, 0x07, 0x00])
         self.assertEqual(out[1] | (out[2] << 8), 200)
         self.assertEqual(self.kb.vial([0xFE, 0x0A, 0x16, 0x00])[1], 1, "permissive hold restored")
+
+
+# --- mod-tap ---------------------------------------------------------------
+
+
+class TestVialModTap(unittest.TestCase):
+    """MT(mod, kc): hold applies the modifier, tap sends the keycode. Space is
+    remapped to MT(LSFT, A)."""
+
+    def setUp(self):
+        self.kb = VialSim()
+        self.kb.boot_usb()
+        self.kb.set_keycode(0, SPC_ROW, SPC_COL, QK_MOD_TAP | (MOD_LSFT << 8) | KC_A)
+
+    def tearDown(self):
+        self.kb.close()
+
+    def test_hold_applies_mod(self):
+        self.kb.set_tick(0)
+        self.kb.key_event(SPC_ROW, SPC_COL, True)
+        self.kb.set_tick(300)
+        self.kb.tapping_task()
+        self.assertEqual(self.kb.report()[0], MOD_LSFT, "hold must apply the modifier")
+        self.kb.key_event(SPC_ROW, SPC_COL, False)
+        self.assertEqual(self.kb.report()[0], 0, "release must clear the modifier")
+
+    def test_tap_sends_keycode(self):
+        self.kb.set_tick(0)
+        self.kb.key_event(SPC_ROW, SPC_COL, True)
+        self.kb.set_tick(10)
+        self.kb.key_event(SPC_ROW, SPC_COL, False)
+        reports = self.kb.ep1_reports()
+        self.assertTrue(any(KC_A in r for r in reports), f"tap must send A; {reports}")
+        self.assertEqual(self.kb.report()[0], 0, "a tap must not leave the modifier")
+
+    def test_right_shift_hold(self):
+        """The 5-bit right-shift encoding (0x12) must map to the 0x20 report
+        bit, not Left Shift + Right Ctrl."""
+        self.kb.set_keycode(0, SPC_ROW, SPC_COL, QK_MOD_TAP | (0x12 << 8) | KC_A)
+        self.kb.set_tick(0)
+        self.kb.key_event(SPC_ROW, SPC_COL, True)
+        self.kb.set_tick(300)
+        self.kb.tapping_task()
+        self.assertEqual(self.kb.report()[0], 0x20, "RSFT must set the right-shift bit")
+        self.kb.key_event(SPC_ROW, SPC_COL, False)
+        self.assertEqual(self.kb.report()[0], 0)
+
+
+# --- one-shot mod ----------------------------------------------------------
+
+
+class TestVialOneShotMod(unittest.TestCase):
+    """OSM(mod): applies the modifier to the next key only. The OSM key is
+    remapped over the Fn position."""
+
+    def setUp(self):
+        self.kb = VialSim()
+        self.kb.boot_usb()
+        self.kb.set_keycode(0, FN_ROW, 0, QK_ONE_SHOT_MOD | MOD_LSFT)
+        self.kb.set_keycode(0, 0, 1, KC_A)
+
+    def tearDown(self):
+        self.kb.close()
+
+    def test_applies_to_next_key(self):
+        self.kb.key_event(FN_ROW, 0, True)
+        self.assertEqual(self.kb.report()[0], MOD_LSFT, "OSM arms the modifier on press")
+        self.kb.key_event(FN_ROW, 0, False)
+        self.assertEqual(self.kb.report()[0], MOD_LSFT, "OSM stays armed after its own release")
+        self.kb.key_event(0, 1, True)
+        self.assertEqual(self.kb.report()[0], MOD_LSFT, "the next key is modified")
+        self.assertEqual(self.kb.report()[2], KC_A)
+        self.kb.key_event(0, 1, False)
+        self.assertEqual(self.kb.report()[0], 0, "OSM clears on the consuming key's release")
+
+    def test_right_shift_osm(self):
+        """The 5-bit right-shift encoding must map to the right-shift report bit."""
+        self.kb.set_keycode(0, FN_ROW, 0, QK_ONE_SHOT_MOD | 0x12)
+        self.kb.key_event(FN_ROW, 0, True)
+        self.assertEqual(self.kb.report()[0], 0x20)
+        self.kb.key_event(FN_ROW, 0, False)
+        self.kb.key_event(0, 1, True)
+        self.assertEqual(self.kb.report()[0], 0x20)
+        self.kb.key_event(0, 1, False)
+        self.assertEqual(self.kb.report()[0], 0)
 
 
 # --- EP1 report protocol ---------------------------------------------------

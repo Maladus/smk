@@ -6,6 +6,7 @@
 #    include "keycodes.h"
 #    include "kbdef.h"
 #    include "matrix.h"
+#    include "report.h"
 #    include "tick.h"
 
 #    include <stdbool.h>
@@ -16,12 +17,14 @@
 #    define TAPPING_BUFFER 8
 
 typedef struct {
-    bool     undecided;   // an LT/TT press is waiting for the term
-    bool     hold_active; // decided hold; the layer stays on until release
+    bool     undecided;   // an LT/TT/MT press is waiting for the term
+    bool     hold_active; // decided hold; the layer/mod stays on until release
     bool     tap_toggle;  // tap toggles the layer (TT) instead of tapping a keycode
+    bool     mod_tap;     // hold applies a modifier (MT) instead of a layer
     uint8_t  row;
     uint8_t  col;
     uint8_t  hold_layer;
+    uint8_t  hold_mods;
     uint16_t tap_keycode;
     uint32_t start_ms;
     uint8_t  count;
@@ -57,7 +60,12 @@ static void decide_hold(void)
 {
     tapping.undecided   = false;
     tapping.hold_active = true;
-    matrix_layer_activate(tapping.hold_layer);
+    if (tapping.mod_tap) {
+        add_mods(MODS_5BIT_TO_8BIT(tapping.hold_mods));
+        send_keyboard_report();
+    } else {
+        matrix_layer_activate(tapping.hold_layer);
+    }
     replay();
 }
 
@@ -72,19 +80,22 @@ static void decide_tap(void)
     replay();
 }
 
-// Arm the tap/hold decision for an LT (tap_keycode) or TT (tap_toggle) key.
-static void arm(uint8_t row, uint8_t col, uint8_t layer, uint16_t tap_keycode, bool tap_toggle)
+// Arm the tap/hold decision for an LT (tap_keycode), TT (tap_toggle) or MT
+// (mod_tap) key.
+static void arm(uint8_t row, uint8_t col, uint8_t layer, uint8_t mods, uint16_t tap_keycode, bool tap_toggle, bool mod_tap)
 {
     if (layer >= VIAL_LAYERS) {
         layer = (uint8_t)(VIAL_LAYERS - 1);
     }
     tapping.undecided   = true;
     tapping.hold_active = false;
+    tapping.tap_toggle  = tap_toggle;
+    tapping.mod_tap     = mod_tap;
     tapping.row         = row;
     tapping.col         = col;
     tapping.hold_layer  = layer;
+    tapping.hold_mods   = mods;
     tapping.tap_keycode = tap_keycode;
-    tapping.tap_toggle  = tap_toggle;
     tapping.start_ms    = tick_ms();
     tapping.count       = 0;
 }
@@ -120,17 +131,27 @@ bool tapping_process_record(uint8_t row, uint8_t col, uint16_t keycode, bool pre
 
     if (tapping.hold_active && row == tapping.row && col == tapping.col && !pressed) {
         tapping.hold_active = false;
-        matrix_layer_deactivate(tapping.hold_layer);
+        if (tapping.mod_tap) {
+            del_mods(MODS_5BIT_TO_8BIT(tapping.hold_mods));
+            send_keyboard_report();
+        } else {
+            matrix_layer_deactivate(tapping.hold_layer);
+        }
+        return true;
+    }
+
+    if (pressed && IS_QK_MOD_TAP(keycode)) {
+        arm(row, col, 0, QK_MOD_TAP_GET_MODS(keycode), QK_MOD_TAP_GET_TAP_KEYCODE(keycode), false, true);
         return true;
     }
 
     if (pressed && IS_QK_LAYER_TAP(keycode)) {
-        arm(row, col, QK_LAYER_TAP_GET_LAYER(keycode), QK_LAYER_TAP_GET_TAP_KEYCODE(keycode), false);
+        arm(row, col, QK_LAYER_TAP_GET_LAYER(keycode), 0, QK_LAYER_TAP_GET_TAP_KEYCODE(keycode), false, false);
         return true;
     }
 
     if (pressed && IS_QK_LAYER_TAP_TOGGLE(keycode)) {
-        arm(row, col, QK_LAYER_TAP_TOGGLE_GET_LAYER(keycode), 0, true);
+        arm(row, col, QK_LAYER_TAP_TOGGLE_GET_LAYER(keycode), 0, 0, true, false);
         return true;
     }
 
