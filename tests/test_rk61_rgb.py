@@ -51,6 +51,8 @@ FX_OFF = 5
 # rf_mode_t (src/peripherals/bk3632/rf_controller.h), duplicated by the Fn
 # channel indicator in indicators.c.
 RF_BT1 = 0x01
+RF_BT2 = 0x02
+RF_BT3 = 0x03
 
 # indicators.c blink masks (status_pulse_counter bits).
 FN_BLINK_FAST = 0x10
@@ -369,6 +371,44 @@ class TestFnChannelIndicator(unittest.TestCase):
                              "Esc keeps the effect while Fn is held")
             self.assertEqual(sim.fb_rgb(FN_ROW, Q_COL), [0, 0, 255],
                              "the active channel key is overlaid blue")
+        finally:
+            sim.close()
+
+    def test_nkro_indicator_lights_n_while_fn_held(self):
+        """N lights white for NKRO while Fn is held, like the channel overlay."""
+        sim = RgbSim()
+        try:
+            sim.set_settings(FX_SOLID_RED, brightness=255)
+            sim.stage_fn(RF_BT1, connected=1, paired=1, pairing_active=0, counter=0)
+            self.assertEqual(sim.fb_rgb(3, 6), [255, 255, 255],
+                             "N lights white for NKRO while Fn is held")
+            sim.stage_fn(RF_BT1, connected=1, paired=1, pairing_active=0, counter=0, fn_held=0)
+            self.assertEqual(sim.fb_rgb(3, 6), [255, 0, 0],
+                             "without Fn the N key shows the effect")
+        finally:
+            sim.close()
+
+    def test_nkro_indicator_off_when_nkro_disabled(self):
+        sim = RgbSim()
+        try:
+            sim.set_settings(FX_SOLID_RED, brightness=255)
+            sim.kb.set_xram(sim.kb._a("keymap_config"), [0])  # NKRO off
+            sim.stage_fn(RF_BT1, connected=1, paired=1, pairing_active=0, counter=0)
+            self.assertEqual(sim.fb_rgb(3, 6), [255, 0, 0],
+                             "N keeps the effect when NKRO is off")
+        finally:
+            sim.close()
+
+    def test_switching_channel_moves_the_indicator(self):
+        """Selecting another BT channel moves the lit key to Q/W/E."""
+        sim = RgbSim()
+        try:
+            sim.set_settings(FX_OFF, brightness=255)  # isolate the overlay
+            for link, want in ((RF_BT1, Q_COL), (RF_BT2, W_COL), (RF_BT3, E_COL)):
+                sim.stage_fn(link, connected=1, paired=1, pairing_active=0, counter=0)
+                lit = {c: sim.fb_blue(FN_ROW, c) for c in (Q_COL, W_COL, E_COL)}
+                self.assertEqual(lit, {c: 255 if c == want else 0 for c in (Q_COL, W_COL, E_COL)},
+                                 f"link {link} lights column {want}")
         finally:
             sim.close()
 

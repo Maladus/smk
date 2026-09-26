@@ -38,6 +38,10 @@
 #define FN_W_COL 2
 #define FN_E_COL 3
 
+// N key: lights while Fn is held when NKRO is on, like the BT channel overlay.
+#define NKRO_ROW 3
+#define NKRO_COL 6
+
 // keyboard_state.rf_link values (match rf_controller.h rf_mode_t; the wireless
 // module is enabled in a later phase, so the constants are duplicated here).
 enum {
@@ -309,6 +313,14 @@ static void led_regen_one(void)
         r = 0;
         g = 0;
         b = fn_channel_blue();
+    }
+
+    // Fn held: light N white while NKRO is on, the same way the BT channel keys
+    // show the active link.
+    if (action_layer != 0 && keymap_config.nkro && regen_row == NKRO_ROW && regen_col == NKRO_COL) {
+        r = 255;
+        g = 255;
+        b = 255;
     }
 
     led_fb[regen_row][0][regen_col] = r;
