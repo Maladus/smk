@@ -19,6 +19,7 @@
 #include "diag.h"
 #ifdef VIAL_ENABLE
 #    include "combo.h"
+#    include "macro.h"
 #    include "tap_dance.h"
 #    include "tapping.h"
 #endif
@@ -127,6 +128,7 @@ void main(void)
         tapping_task();
         combo_task();
         tap_dance_task();
+        macro_task();
 #endif
         indicators_render();
         usb_task();

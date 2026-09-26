@@ -462,6 +462,27 @@ class VialSim(Rk61Sim):
         layers = (out[5] << 8) | out[6]
         return out[0], (trigger, replacement, layers, out[7], out[8], out[9], out[10])
 
+    # --- VIA macro protocol ----------------------------------------------
+    def macro_task(self):
+        self.call(self.sym["macro_task"])
+
+    def macro_count(self):
+        return self.vial([0x0C])[1]
+
+    def macro_buffer_size(self):
+        out = self.vial([0x0D])
+        return out[1] | (out[2] << 8)
+
+    def set_macro_buffer(self, offset, data):
+        return self.vial([0x0F, (offset >> 8) & 0xFF, offset & 0xFF, len(data)] + list(data))
+
+    def get_macro_buffer(self, offset, size):
+        out = self.vial([0x0E, (offset >> 8) & 0xFF, offset & 0xFF, size])
+        return out[4:4 + size]
+
+    def macro_reset(self):
+        self.vial([0x10])
+
     # --- report capture ---------------------------------------------------
     def ep1_reports(self):
         return [[int(x, 16) for x in m.split()]
@@ -652,10 +673,10 @@ class TestVialProtocol(unittest.TestCase):
     def test_layer_count(self):
         self.assertEqual(self.kb.vial([0x11])[1], 4)
 
-    def test_macro_count_and_buffer_size_zero(self):
-        self.assertEqual(self.kb.vial([0x0C])[1], 0)
+    def test_macro_count_and_buffer_size(self):
+        self.assertEqual(self.kb.vial([0x0C])[1], 8)
         out = self.kb.vial([0x0D])
-        self.assertEqual((out[1], out[2]), (0, 0))
+        self.assertEqual((out[1], out[2]), (256 & 0xFF, 256 >> 8))
 
     def test_unlock_handshake_accepts_immediately(self):
         """VIAL_INSECURE: the unlock handshake completes with no key combo."""
@@ -1276,6 +1297,71 @@ class TestVialKeyOverride(unittest.TestCase):
         self.assertEqual(self.kb.report()[2], KC_DELETE)
         self.kb.key_event(self.KO_ROW, self.KO_COL, False)
         self.kb.key_event(3, 0, False)
+
+
+# --- macros ----------------------------------------------------------------
+
+
+class TestVialMacros(unittest.TestCase):
+    """VIA macro buffer and player."""
+
+    MACRO_ROW, MACRO_COL = 0, 0  # Esc position -> QK_MACRO_0
+
+    def setUp(self):
+        self.kb = VialSim()
+        self.kb.boot_usb()
+        self.kb.set_keycode(0, self.MACRO_ROW, self.MACRO_COL, 0x7700)
+
+    def tearDown(self):
+        self.kb.close()
+
+    def test_count_and_buffer_size(self):
+        self.assertEqual(self.kb.macro_count(), 8)
+        self.assertEqual(self.kb.macro_buffer_size(), 256)
+
+    def test_buffer_get_set(self):
+        data = [0x01, 0x01, KC_A, 0x00]
+        self.kb.set_macro_buffer(0, data)
+        self.assertEqual(self.kb.get_macro_buffer(0, len(data)), data)
+
+    def test_reset_clears_buffer(self):
+        self.kb.set_macro_buffer(0, [0x01, 0x01, KC_A, 0x00])
+        self.kb.macro_reset()
+        self.assertEqual(self.kb.get_macro_buffer(0, 4), [0, 0, 0, 0])
+
+    def test_play_tap(self):
+        self.kb.set_macro_buffer(0, [0x01, 0x01, KC_A, 0x00])
+        self.kb.key_event(self.MACRO_ROW, self.MACRO_COL, True)
+        self.kb.macro_task()
+        reps = self.kb.ep1_reports()
+        self.assertTrue(any(KC_A in r for r in reps), f"macro should tap A; {reps}")
+        self.kb.key_event(self.MACRO_ROW, self.MACRO_COL, False)
+
+    def test_play_down_up(self):
+        self.kb.set_macro_buffer(0, [0x01, 0x02, KC_A, 0x01, 0x03, KC_A, 0x00])
+        self.kb.key_event(self.MACRO_ROW, self.MACRO_COL, True)
+        self.kb.macro_task()  # down A
+        self.assertEqual(self.kb.report()[2], KC_A)
+        self.kb.macro_task()  # up A
+        self.assertEqual(self.kb.report()[2], 0)
+        self.kb.key_event(self.MACRO_ROW, self.MACRO_COL, False)
+
+    def test_play_delay(self):
+        # tap A, delay 10 ms, tap B
+        self.kb.set_macro_buffer(0, [0x01, 0x01, KC_A, 0x01, 0x04, 0x0B, 0x01, 0x01, 0x01, KC_B, 0x00])
+        self.kb.set_tick(0)
+        self.kb.key_event(self.MACRO_ROW, self.MACRO_COL, True)
+        self.kb.macro_task()  # tap A
+        self.kb.macro_task()  # arm the delay
+        self.kb.set_tick(5)
+        self.kb.macro_task()  # still waiting
+        reps = self.kb.ep1_reports()
+        self.assertFalse(any(KC_B in r for r in reps), "B must wait for the delay")
+        self.kb.set_tick(20)
+        self.kb.macro_task()  # delay elapsed, tap B
+        reps = self.kb.ep1_reports()
+        self.assertTrue(any(KC_B in r for r in reps), "B after the delay")
+        self.kb.key_event(self.MACRO_ROW, self.MACRO_COL, False)
 
 
 # --- EP1 report protocol ---------------------------------------------------

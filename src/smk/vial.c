@@ -29,6 +29,9 @@
 #    define CMD_VIA_RESET_KEYCODE         0x06
 #    define CMD_VIA_MACRO_GET_COUNT       0x0C
 #    define CMD_VIA_MACRO_GET_BUFFER_SIZE 0x0D
+#    define CMD_VIA_MACRO_GET_BUFFER      0x0E
+#    define CMD_VIA_MACRO_SET_BUFFER      0x0F
+#    define CMD_VIA_MACRO_RESET           0x10
 #    define CMD_VIA_GET_LAYER_COUNT       0x11
 #    define CMD_VIA_KEYMAP_GET_BUFFER     0x12
 #    define CMD_VIA_KEYMAP_SET_BUFFER     0x13
@@ -584,12 +587,38 @@ static void vial_handle_via(const uint8_t *in, uint8_t *out)
             return;
 
         case CMD_VIA_MACRO_GET_COUNT:
-            out[1] = 0;
+            out[1] = dynamic_keymap_macro_count();
             return;
 
-        case CMD_VIA_MACRO_GET_BUFFER_SIZE:
-            out[1] = 0;
-            out[2] = 0;
+        case CMD_VIA_MACRO_GET_BUFFER_SIZE: {
+            const uint16_t size = dynamic_keymap_macro_buffer_size();
+            out[1]              = (uint8_t)(size & 0xFF);
+            out[2]              = (uint8_t)(size >> 8);
+            return;
+        }
+
+        case CMD_VIA_MACRO_GET_BUFFER: {
+            const uint16_t offset = rd16be(in + 1);
+            uint8_t        size   = in[3]; // <= 28 bytes
+            if (size > 28) {
+                size = 28;
+            }
+            dynamic_keymap_macro_get_buffer(offset, size, out + 4);
+            return;
+        }
+
+        case CMD_VIA_MACRO_SET_BUFFER: {
+            const uint16_t offset = rd16be(in + 1);
+            uint8_t        size   = in[3]; // <= 28 bytes
+            if (size > 28) {
+                size = 28;
+            }
+            dynamic_keymap_macro_set_buffer(offset, size, in + 4);
+            return;
+        }
+
+        case CMD_VIA_MACRO_RESET:
+            dynamic_keymap_macro_reset();
             return;
 
         case CMD_VIA_GET_LAYER_COUNT:

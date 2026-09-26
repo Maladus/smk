@@ -18,4 +18,5 @@ src_smk += files(
     'combo.c',
     'tap_dance.c',
     'key_override.c',
+    'macro.c',
 )

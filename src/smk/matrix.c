@@ -20,6 +20,7 @@
 #    include "combo.h"
 #    include "dynamic_keymap.h"
 #    include "key_override.h"
+#    include "macro.h"
 #    include "tap_dance.h"
 #    include "tapping.h"
 #endif
@@ -110,6 +111,7 @@ void matrix_init()
     combo_init();
     tap_dance_init();
     key_override_init();
+    macro_init();
 #endif
 }
 
@@ -445,6 +447,10 @@ static void process_key_state(uint8_t row, uint8_t col, bool pressed)
     const uint16_t kc    = KEYMAP_GET(layer, row, col);
 
     if (tap_dance_process_record(row, col, kc, pressed)) {
+        return;
+    }
+
+    if (macro_process_record(kc, pressed)) {
         return;
     }
 

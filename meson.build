@@ -156,6 +156,9 @@ foreach keyboard, board : keyboards
                 vial_combo_entries = options.get('vial_combo_entries', 0)
                 vial_tap_dance_entries = options.get('vial_tap_dance_entries', 0)
                 vial_key_override_entries = options.get('vial_key_override_entries', 0)
+                vial_macro_count = options.get('vial_macro_count', 0)
+                vial_macro_buffer_size = options.get('vial_macro_buffer_size', 0)
+                vial_macro_sectors = options.get('vial_macro_sectors', 0)
                 vial_layers = options.get('vial_layers', 4)
                 if vial_layers < 1 or vial_layers > 16
                     error(
@@ -168,11 +171,17 @@ foreach keyboard, board : keyboards
                         'vial dynamic entries for layout @0@ of keyboard @1@ need at least 2 vial_entry_sectors (A/B), got @2@'.format(layout, keyboard, vial_entry_sectors),
                     )
                 endif
-                # The dynamic-entry store sits between the keymap store and the
-                # settings sector; both grow downward from settings_addr.
-                vial_keymap_addr = settings_addr - (vial_keymap_sectors + vial_entry_sectors) * spec['sector_size']
+                if vial_macro_buffer_size > 0 and vial_macro_sectors < 2
+                    error(
+                        'vial macros for layout @0@ of keyboard @1@ need at least 2 vial_macro_sectors (A/B), got @2@'.format(layout, keyboard, vial_macro_sectors),
+                    )
+                endif
+                # The stores grow downward from the settings sector: macro
+                # buffer, then keymap, then dynamic entries.
+                vial_macro_addr = settings_addr - (vial_keymap_sectors + vial_entry_sectors + vial_macro_sectors) * spec['sector_size']
+                vial_keymap_addr = vial_macro_addr + vial_macro_sectors * spec['sector_size']
                 vial_entry_addr = vial_keymap_addr + vial_keymap_sectors * spec['sector_size']
-                code_size = vial_keymap_addr
+                code_size = vial_macro_addr
                 platform_cc_args += [
                     '-DVIAL_ENABLE=1',
                     '-DVIAL_KEYMAP_ADDR=@0@u'.format(vial_keymap_addr),
@@ -180,9 +189,14 @@ foreach keyboard, board : keyboards
                     '-DVIAL_COMBO_ENTRIES=@0@'.format(vial_combo_entries),
                     '-DVIAL_TAP_DANCE_ENTRIES=@0@'.format(vial_tap_dance_entries),
                     '-DVIAL_KEY_OVERRIDE_ENTRIES=@0@'.format(vial_key_override_entries),
+                    '-DVIAL_MACRO_COUNT=@0@'.format(vial_macro_count),
+                    '-DVIAL_MACRO_BUFFER_SIZE=@0@'.format(vial_macro_buffer_size),
                 ]
                 if vial_entry_sectors > 0
                     platform_cc_args += ['-DVIAL_ENTRY_ADDR=@0@u'.format(vial_entry_addr)]
+                endif
+                if vial_macro_sectors > 0
+                    platform_cc_args += ['-DVIAL_MACRO_ADDR=@0@u'.format(vial_macro_addr)]
                 endif
             endif
             platform_cc_args += [

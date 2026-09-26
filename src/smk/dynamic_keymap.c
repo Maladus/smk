@@ -568,6 +568,219 @@ int dynamic_keymap_set_key_override(uint8_t index, const vial_key_override_entry
 
 #    endif // dynamic entries
 
+// --- macro store ----------------------------------------------------------
+//
+// A second A/B flash sector pair holds the VIA macro buffer. Same header and
+// A/B write scheme as the other stores; the whole buffer is kept in RAM so the
+// macro player can walk it without flash reads.
+#    if VIAL_MACRO_BUFFER_SIZE > 0
+#        ifndef VIAL_MACRO_ADDR
+#            error "vial macros need VIAL_MACRO_ADDR (set vial_macro_sectors in meson)"
+#        endif
+
+#        define VIAL_MACRO_MAGIC0      0x4Du // 'M'
+#        define VIAL_MACRO_MAGIC1      0x41u // 'A'
+#        define VIAL_MACRO_VERSION     1u
+#        define VIAL_MACRO_HEADER_SIZE 16u
+#        define VIAL_MACRO_TOTAL       (VIAL_MACRO_HEADER_SIZE + VIAL_MACRO_BUFFER_SIZE)
+
+#        define MA_MAGIC0   0u
+#        define MA_MAGIC1   1u
+#        define MA_VERSION  2u
+#        define MA_SEQ      3u
+#        define MA_CKSUM_LO 4u
+#        define MA_CKSUM_HI 5u
+#        define MA_PAYLOAD  VIAL_MACRO_HEADER_SIZE
+
+_Static_assert(VIAL_MACRO_TOTAL <= VIAL_KEYMAP_SECTOR_SIZE, "vial macro store does not fit one flash sector");
+
+static __xdata uint8_t macro_sector[VIAL_MACRO_TOTAL];
+static uint8_t         macro_active_sector;
+static bool            macro_ready;
+
+static uint16_t macro_sector_addr(uint8_t idx)
+{
+    return (uint16_t)(VIAL_MACRO_ADDR + (uint16_t)idx * VIAL_KEYMAP_SECTOR_SIZE);
+}
+
+static uint16_t macro_checksum(const __xdata uint8_t *buf)
+{
+    uint16_t sum = 0;
+    for (uint16_t i = 0; i < VIAL_MACRO_TOTAL; i++) {
+        uint8_t b = (i == MA_CKSUM_LO || i == MA_CKSUM_HI) ? 0 : buf[i];
+        sum += b;
+    }
+    return sum;
+}
+
+static bool macro_valid(const __xdata uint8_t *buf)
+{
+    if (buf[MA_MAGIC0] != VIAL_MACRO_MAGIC0 || buf[MA_MAGIC1] != VIAL_MACRO_MAGIC1) {
+        return false;
+    }
+    if (buf[MA_VERSION] != VIAL_MACRO_VERSION) {
+        return false;
+    }
+    const uint16_t stored = (uint16_t)(buf[MA_CKSUM_LO] | ((uint16_t)buf[MA_CKSUM_HI] << 8));
+    return macro_checksum(buf) == stored;
+}
+
+static void macro_begin(void)
+{
+    keymap_read(macro_sector_addr(macro_active_sector), macro_sector, VIAL_MACRO_TOTAL);
+}
+
+static void macro_commit(void)
+{
+    const uint8_t spare = macro_active_sector ^ 1u;
+
+    macro_sector[MA_SEQ]++;
+    const uint16_t checksum   = macro_checksum(macro_sector);
+    macro_sector[MA_CKSUM_LO] = (uint8_t)(checksum & 0xFF);
+    macro_sector[MA_CKSUM_HI] = (uint8_t)(checksum >> 8);
+
+    flash_erase(FLASH_CODE, macro_sector_addr(spare));
+    keymap_program(macro_sector_addr(spare), macro_sector, VIAL_MACRO_TOTAL);
+    macro_active_sector = spare;
+}
+
+static void macro_seed_defaults(void)
+{
+    for (uint16_t i = 0; i < VIAL_MACRO_TOTAL; i++) {
+        macro_sector[i] = 0;
+    }
+    macro_sector[MA_MAGIC0]  = VIAL_MACRO_MAGIC0;
+    macro_sector[MA_MAGIC1]  = VIAL_MACRO_MAGIC1;
+    macro_sector[MA_VERSION] = VIAL_MACRO_VERSION;
+    macro_sector[MA_SEQ]     = 0;
+    macro_active_sector      = 1; // macro_commit() writes the spare, so sector 0
+    macro_commit();
+    macro_ready = true;
+}
+
+static void dynamic_macro_init(void)
+{
+    macro_ready         = false;
+    macro_active_sector = 0;
+
+    bool    valid[2];
+    uint8_t seq[2];
+    for (uint8_t i = 0; i < 2; i++) {
+        keymap_read(macro_sector_addr(i), macro_sector, VIAL_MACRO_TOTAL);
+        valid[i] = macro_valid(macro_sector);
+        seq[i]   = macro_sector[MA_SEQ];
+    }
+
+    int8_t pick = -1;
+    if (valid[0] && valid[1]) {
+        pick = ((int8_t)(seq[1] - seq[0]) > 0) ? 1 : 0;
+    } else if (valid[0]) {
+        pick = 0;
+    } else if (valid[1]) {
+        pick = 1;
+    }
+
+    if (pick < 0) {
+        macro_seed_defaults();
+        return;
+    }
+
+    macro_active_sector = (uint8_t)pick;
+    macro_begin();
+    macro_ready = true;
+}
+
+uint8_t dynamic_keymap_macro_count(void)
+{
+    return VIAL_MACRO_COUNT;
+}
+
+uint16_t dynamic_keymap_macro_buffer_size(void)
+{
+    return VIAL_MACRO_BUFFER_SIZE;
+}
+
+uint8_t dynamic_keymap_macro_read_byte(uint16_t offset)
+{
+    if (!macro_ready || offset >= VIAL_MACRO_BUFFER_SIZE) {
+        return 0;
+    }
+    return macro_sector[MA_PAYLOAD + offset];
+}
+
+void dynamic_keymap_macro_get_buffer(uint16_t offset, uint16_t size, uint8_t *out)
+{
+    for (uint16_t i = 0; i < size; i++) {
+        out[i] = dynamic_keymap_macro_read_byte((uint16_t)(offset + i));
+    }
+}
+
+void dynamic_keymap_macro_set_buffer(uint16_t offset, uint16_t size, const uint8_t *in)
+{
+    if (!macro_ready) {
+        return;
+    }
+    macro_begin();
+    for (uint16_t i = 0; i < size; i++) {
+        const uint16_t o = (uint16_t)(offset + i);
+        if (o >= VIAL_MACRO_BUFFER_SIZE) {
+            break;
+        }
+        macro_sector[MA_PAYLOAD + o] = in[i];
+    }
+    macro_commit();
+}
+
+void dynamic_keymap_macro_reset(void)
+{
+    if (!macro_ready) {
+        return;
+    }
+    macro_begin();
+    for (uint16_t i = 0; i < VIAL_MACRO_BUFFER_SIZE; i++) {
+        macro_sector[MA_PAYLOAD + i] = 0;
+    }
+    macro_commit();
+}
+
+#    else // VIAL_MACRO_BUFFER_SIZE == 0
+
+static void dynamic_macro_init(void) {}
+
+uint8_t dynamic_keymap_macro_count(void)
+{
+    return 0;
+}
+
+uint16_t dynamic_keymap_macro_buffer_size(void)
+{
+    return 0;
+}
+
+uint8_t dynamic_keymap_macro_read_byte(uint16_t offset)
+{
+    (void)offset;
+    return 0;
+}
+
+void dynamic_keymap_macro_get_buffer(uint16_t offset, uint16_t size, uint8_t *out)
+{
+    (void)offset;
+    (void)size;
+    (void)out;
+}
+
+void dynamic_keymap_macro_set_buffer(uint16_t offset, uint16_t size, const uint8_t *in)
+{
+    (void)offset;
+    (void)size;
+    (void)in;
+}
+
+void dynamic_keymap_macro_reset(void) {}
+
+#    endif // VIAL_MACRO_BUFFER_SIZE
+
 void dynamic_keymap_init(void)
 {
     store_ready   = false;
@@ -604,6 +817,7 @@ void dynamic_keymap_init(void)
     }
 
     dynamic_entry_init();
+    dynamic_macro_init();
 }
 
 uint16_t dynamic_keymap_get(uint8_t layer, uint8_t row, uint8_t col)

@@ -89,4 +89,15 @@ uint8_t dynamic_keymap_key_override_count(void);
 int     dynamic_keymap_get_key_override(uint8_t index, vial_key_override_entry_t *entry);
 int     dynamic_keymap_set_key_override(uint8_t index, const vial_key_override_entry_t *entry);
 
+// VIA macro buffer. The buffer is a flat byte array; macros are separated by a
+// 0x00 byte. Bytes are the QMK send-string encoding (0x01 prefix, then
+// 0x01/0x02/0x03 for tap/down/up followed by a keycode, or 0x04 followed by a
+// two-byte delay).
+uint8_t  dynamic_keymap_macro_count(void);
+uint16_t dynamic_keymap_macro_buffer_size(void);
+uint8_t  dynamic_keymap_macro_read_byte(uint16_t offset);
+void     dynamic_keymap_macro_get_buffer(uint16_t offset, uint16_t size, uint8_t *out);
+void     dynamic_keymap_macro_set_buffer(uint16_t offset, uint16_t size, const uint8_t *in);
+void     dynamic_keymap_macro_reset(void);
+
 #endif // VIAL_ENABLE
