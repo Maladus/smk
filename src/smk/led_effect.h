@@ -13,6 +13,8 @@ typedef enum {
     FX_KNIGHT,     // bright segment bouncing left <-> right
     FX_GRADIENT,   // static colour ramp across the board
     FX_TWINKLE,    // pseudo-random per-key flicker
+    FX_SOLID_REACTIVE, // solid base; a pressed key flashes white and fades
+    FX_SPLASH,         // pressed keys light up and fade (ripple burst)
     FX_COUNT
 } led_effect_t;
 
@@ -36,3 +38,10 @@ bool led_effect_rgb(led_effect_t fx, uint8_t row, uint8_t col, uint8_t phase, ui
 bool led_effect_rgb_colored(led_effect_t fx, uint8_t row, uint8_t col, uint8_t phase, uint8_t brightness, uint8_t color, uint8_t out[3]);
 
 bool led_effect_mono(led_effect_t fx, uint8_t row, uint8_t col, uint8_t phase, uint8_t *out);
+
+// Reactive (key-press) effect state. led_effect_reactive_press() latches a
+// key's intensity when it is pressed; led_effect_reactive_tick() decays every
+// key's intensity and must be called once per LED frame. Only the reactive
+// effects read the state; the others ignore it.
+void led_effect_reactive_press(uint8_t row, uint8_t col);
+void led_effect_reactive_tick(void);

@@ -53,7 +53,9 @@ FX_SNAKE = 6
 FX_KNIGHT = 7
 FX_GRADIENT = 8
 FX_TWINKLE = 9
-FX_OFF = 10  # == FX_COUNT, end of the cycle
+FX_SOLID_REACTIVE = 10
+FX_SPLASH = 11
+FX_OFF = 12  # == FX_COUNT, end of the cycle
 
 # Colour palette slots (src/smk/led_effect.c): slot 0 is white, slot 1 red.
 PAL_WHITE = 0
@@ -215,6 +217,57 @@ class TestPwmDutyAndColumns(unittest.TestCase):
                                  f"row {row}: blue value lands on the B sink")
             for i in SPARE:
                 self.assertEqual(d2[i], 0, f"spare sink PWM2{i - 10} stays dark")
+        finally:
+            sim.close()
+
+
+class TestReactiveEffects(unittest.TestCase):
+    """Key-press effects read the reactive[] intensity latched on press and
+    decayed per frame. Stage it directly (the press hook just writes it)."""
+
+    def _reactive(self, sim):
+        return sim.kb._static("led_effect", "reactive")
+
+    def test_solid_reactive_lights_pressed_key(self):
+        sim = RgbSim()
+        try:
+            sim.set_settings(FX_SOLID_REACTIVE, brightness=255, color=PAL_RED)
+            base = self._reactive(sim)
+            sim.kb.set_xram(base + 0, [255])  # key (0, 0) fully pressed
+            sim.render()
+            self.assertEqual(sim.fb_rgb(0, 0), [255, 255, 255],
+                             "a fully pressed key blends the red base to white")
+            self.assertEqual(sim.fb_rgb(0, 1), [255, 0, 0],
+                             "an unpressed key keeps the base colour")
+        finally:
+            sim.close()
+
+    def test_splash_lights_pressed_key_only(self):
+        sim = RgbSim()
+        try:
+            sim.set_settings(FX_SPLASH, brightness=255, color=PAL_RED)
+            base = self._reactive(sim)
+            sim.kb.set_xram(base + 0, [255])  # key (0, 0)
+            sim.render()
+            self.assertEqual(sim.fb_rgb(0, 0), [254, 0, 0],
+                             "a pressed key lights up in the palette colour")
+            self.assertEqual(sim.fb_rgb(0, 1), [0, 0, 0],
+                             "the dark base leaves unpressed keys off")
+        finally:
+            sim.close()
+
+    def test_reactive_tick_decays(self):
+        sim = RgbSim()
+        try:
+            base = self._reactive(sim)
+            sim.kb.set_xram(base + 0, [255])
+            sim.kb.call(sim.kb._a("led_effect_reactive_tick"))
+            self.assertEqual(sim.kb.get_xram(base + 0, 1)[0], 255 - 12,
+                             "one tick decays the intensity by the step")
+            for _ in range(30):
+                sim.kb.call(sim.kb._a("led_effect_reactive_tick"))
+            self.assertEqual(sim.kb.get_xram(base + 0, 1)[0], 0,
+                             "the intensity decays to zero")
         finally:
             sim.close()
 
@@ -433,7 +486,7 @@ class TestEffectControls(unittest.TestCase):
     def test_next_effect_cycles_and_wraps(self):
         sim = RgbSim()
         try:
-            sim.kb.set_xram(sim.kb._a("user_settings"), [FX_TWINKLE, 255, 4])
+            sim.kb.set_xram(sim.kb._a("user_settings"), [FX_SPLASH, 255, 4])
             sim.kb.call(sim.kb._a("indicators_next_effect"))
             self.assertEqual(self._settings(sim)[0], FX_OFF)
             sim.kb.call(sim.kb._a("indicators_next_effect"))

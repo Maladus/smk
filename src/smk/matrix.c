@@ -9,6 +9,7 @@
 #include "host.h"
 #include "delay.h"
 #include "indicators.h"
+#include "led_effect.h"
 #include "sleep.h"
 #ifdef ISP_ENABLE
 #    include "isp.h"
@@ -451,6 +452,11 @@ void matrix_send_keycode(uint16_t keycode, bool pressed)
 
 static void process_key_state(uint8_t row, uint8_t col, bool pressed)
 {
+    if (pressed) {
+        // Latch the key for the reactive (key-press) LED effects.
+        led_effect_reactive_press(row, col);
+    }
+
 #ifdef VIAL_ENABLE
     const uint8_t  layer = pressed ? resolve_layer(row, col) : press_layer_get(row, col);
     const uint16_t kc    = KEYMAP_GET(layer, row, col);

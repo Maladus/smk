@@ -1,5 +1,48 @@
 #include "led_effect.h"
+#include "kbdef.h"
 #include "user_led.h"
+
+// Reactive (key-press) intensity per key, latched on press and decayed each
+// frame. Zero for every non-reactive effect.
+static uint8_t reactive[MATRIX_ROWS][MATRIX_COLS];
+
+// Per-frame decay step for the reactive intensity (255 / 12 ~= 21 frames).
+#define REACTIVE_DECAY 12u
+
+void led_effect_reactive_press(uint8_t row, uint8_t col)
+{
+    if (row >= MATRIX_ROWS || col >= MATRIX_COLS) {
+        return;
+    }
+
+    // The pressed key flashes at full intensity.
+    reactive[row][col] = 255;
+
+    // Splash spread: light the eight neighbours at half intensity so a press
+    // reads as a small burst. FX_SOLID_REACTIVE only uses the centre key.
+    for (int8_t dr = -1; dr <= 1; dr++) {
+        for (int8_t dc = -1; dc <= 1; dc++) {
+            if (dr == 0 && dc == 0) {
+                continue;
+            }
+            const int8_t r = (int8_t)row + dr;
+            const int8_t c = (int8_t)col + dc;
+            if (r >= 0 && r < MATRIX_ROWS && c >= 0 && c < MATRIX_COLS && reactive[r][c] < 128u) {
+                reactive[r][c] = 128;
+            }
+        }
+    }
+}
+
+void led_effect_reactive_tick(void)
+{
+    for (uint8_t row = 0; row < MATRIX_ROWS; row++) {
+        for (uint8_t col = 0; col < MATRIX_COLS; col++) {
+            const uint8_t v = reactive[row][col];
+            reactive[row][col] = (v > REACTIVE_DECAY) ? (uint8_t)(v - REACTIVE_DECAY) : 0;
+        }
+    }
+}
 
 // Triangle wave: 0 at 0, 255 at 128, 0 at 256 (wraps). Drives breathing and
 // the knight sweep.
@@ -138,6 +181,28 @@ static void effect_color(led_effect_t fx, uint8_t row, uint8_t col, uint8_t phas
             }
             return;
 
+        case FX_SOLID_REACTIVE: {
+            // Static palette base; a pressed key blends toward white as its
+            // reactive intensity decays.
+            const uint8_t r = reactive[row][col];
+            led_color_palette(color, out);
+            out[0] = (uint8_t)(out[0] + ((((255u - out[0]) * r) + 255u) >> 8));
+            out[1] = (uint8_t)(out[1] + ((((255u - out[1]) * r) + 255u) >> 8));
+            out[2] = (uint8_t)(out[2] + ((((255u - out[2]) * r) + 255u) >> 8));
+            return;
+        }
+
+        case FX_SPLASH: {
+            // Dark base; pressed keys (and their neighbours) light up in the
+            // palette colour and fade.
+            const uint8_t r = reactive[row][col];
+            led_color_palette(color, out);
+            out[0] = (uint8_t)(((uint16_t)out[0] * r) >> 8);
+            out[1] = (uint8_t)(((uint16_t)out[1] * r) >> 8);
+            out[2] = (uint8_t)(((uint16_t)out[2] * r) >> 8);
+            return;
+        }
+
         case FX_RADIAL:
         case FX_HORIZONTAL:
         case FX_VERTICAL:
@@ -194,6 +259,11 @@ bool led_effect_mono(led_effect_t fx, uint8_t row, uint8_t col, uint8_t phase, u
         *out = (abs_diff(user_led_axis_x(col), triangle(phase)) < 32u) ? 255 : 0;
     } else if (fx == FX_TWINKLE) {
         *out = (twinkle_hash(row, col, phase) & 0x80u) ? 255 : 0;
+    } else if (fx == FX_SOLID_REACTIVE) {
+        // Dim base; a pressed key brightens and fades.
+        *out = (uint8_t)(128u + (reactive[row][col] >> 1));
+    } else if (fx == FX_SPLASH) {
+        *out = reactive[row][col];
     } else {
         const uint8_t x = led_effect_index(fx, row, col, phase);
         *out            = (x < 128) ? (uint8_t)(x << 1) : (uint8_t)((uint8_t)(255 - x) << 1);

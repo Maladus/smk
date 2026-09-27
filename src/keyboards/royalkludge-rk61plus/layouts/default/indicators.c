@@ -207,7 +207,8 @@ bool indicators_update_step(keyboard_state_t *keyboard, uint8_t current_step)
         anim_ctr  = 0;
         led_phase = (uint8_t)(led_phase + user_settings.led_speed);
         status_pulse_counter++;
-        render_dirty = true; // animation and/or Fn indicator advanced
+        led_effect_reactive_tick(); // decay the key-press effect intensities
+        render_dirty = true;        // animation and/or Fn indicator advanced
     }
 
     indicators_pwm_disable();
