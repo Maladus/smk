@@ -706,7 +706,7 @@ class TestVialProtocol(unittest.TestCase):
         keys = [cell for row in doc["layouts"]["keymap"] for cell in row
                 if isinstance(cell, str) and "," in cell]
         self.assertEqual(len(keys), 61, "61-key layout")
-        self.assertEqual(len(doc["customKeycodes"]), 10, "10 custom board keys")
+        self.assertEqual(len(doc["customKeycodes"]), 11, "11 custom board keys")
 
     def test_qmk_settings_query(self):
         out = self.kb.vial([0xFE, 0x09])

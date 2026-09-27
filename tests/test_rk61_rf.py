@@ -102,7 +102,7 @@ class TestLinkSelection(RfTestCase):
 
         links = self.link_frames()
         self.assertTrue(links, "expected a link-selection frame")
-        self.assertEqual(links[-1][3], 0, "a short press must not request pairing")
+        self.assertEqual(links[-1][3], 1, "a short press advertises the selected channel")
         self.assertEqual(links[-1][4], RF_MODE_BT2)
         self.assertEqual(self.state_byte(1), RF_MODE_BT2,
                          "keyboard_state.rf_link should follow the selection")

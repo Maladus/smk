@@ -42,11 +42,22 @@ def setUpModule():
         raise unittest.SkipTest(reason)
 
 
-# led_effect_t (src/smk/led_effect.h): FX_SOLID paints every key bright white.
+# led_effect_t (src/smk/led_effect.h): the effect list, in Fn+\ cycle order.
+FX_RADIAL = 0
+FX_HORIZONTAL = 1
+FX_VERTICAL = 2
 FX_SOLID = 3
-# FX_SOLID_RED is the RK61 default; FX_OFF (== FX_COUNT) is the end of the cycle.
-FX_SOLID_RED = 4
-FX_OFF = 5
+FX_BREATHING = 4
+FX_RAINBOW = 5
+FX_SNAKE = 6
+FX_KNIGHT = 7
+FX_GRADIENT = 8
+FX_TWINKLE = 9
+FX_OFF = 10  # == FX_COUNT, end of the cycle
+
+# Colour palette slots (src/smk/led_effect.c): slot 0 is white, slot 1 red.
+PAL_WHITE = 0
+PAL_RED = 1
 
 # rf_mode_t (src/peripherals/bk3632/rf_controller.h), duplicated by the Fn
 # channel indicator in indicators.c.
@@ -95,9 +106,9 @@ class RgbSim:
     def close(self):
         self.kb.close()
 
-    def set_settings(self, effect, brightness=255, speed=4):
-        # user_settings_t: led_effect, led_brightness, led_speed, ...
-        self.kb.set_xram(self.kb._a("user_settings"), [effect, brightness, speed])
+    def set_settings(self, effect, brightness=255, speed=4, color=PAL_WHITE):
+        # user_settings_t: led_effect, led_brightness, led_speed, led_color, ...
+        self.kb.set_xram(self.kb._a("user_settings"), [effect, brightness, speed, color])
 
     def render(self):
         self.kb.set_xram(self.kb._static("indicators", "render_dirty"), [1])
@@ -215,6 +226,7 @@ class TestFnChannelIndicator(unittest.TestCase):
     def test_solid_when_connected(self):
         sim = RgbSim()
         try:
+            sim.set_settings(FX_OFF, brightness=255)  # isolate the overlay
             for counter in (0x00, 0x01, 0x08, 0x09):
                 sim.stage_fn(RF_BT1, connected=1, paired=1,
                              pairing_active=0, counter=counter)
@@ -240,21 +252,17 @@ class TestFnChannelIndicator(unittest.TestCase):
         finally:
             sim.close()
 
-    def test_slow_blink_when_connecting(self):
+    def test_solid_when_paired_not_connected(self):
+        """A bound channel (paired) shows solid blue even before a host
+        reconnects; slow blink is only for an unbound channel."""
         sim = RgbSim()
         try:
-            for counter in (FN_BLINK_SLOW, FN_BLINK_SLOW | 0x01, FN_BLINK_SLOW | 0x10):  # slow bit set
+            sim.set_settings(FX_OFF, brightness=255)  # isolate the overlay
+            for counter in (0x00, 0x01, FN_BLINK_SLOW, FN_BLINK_FAST):
                 sim.stage_fn(RF_BT1, connected=0, paired=1,
                              pairing_active=0, counter=counter)
                 self.assertEqual(sim.fb_blue(FN_ROW, Q_COL), 255,
-                                 f"slow blink ON at counter 0x{counter:02x}")
-                self.assertEqual(sim.fb_blue(FN_ROW, W_COL), 0, "W dark")
-                self.assertEqual(sim.fb_blue(FN_ROW, E_COL), 0, "E dark")
-            for counter in (0x00, 0x01, FN_BLINK_FAST):  # slow bit clear
-                sim.stage_fn(RF_BT1, connected=0, paired=1,
-                             pairing_active=0, counter=counter)
-                self.assertEqual(sim.fb_blue(FN_ROW, Q_COL), 0,
-                                 f"slow blink OFF at counter 0x{counter:02x}")
+                                 f"solid blue (paired) at counter 0x{counter:02x}")
                 self.assertEqual(sim.fb_blue(FN_ROW, W_COL), 0, "W dark")
                 self.assertEqual(sim.fb_blue(FN_ROW, E_COL), 0, "E dark")
         finally:
@@ -281,6 +289,7 @@ class TestFnChannelIndicator(unittest.TestCase):
     def test_fast_blink_when_pairing(self):
         sim = RgbSim()
         try:
+            sim.set_settings(FX_OFF, brightness=255)  # isolate the overlay
             for counter in (FN_BLINK_FAST, FN_BLINK_FAST | 0x01, FN_BLINK_FAST | 0x02):  # fast bit set
                 sim.stage_fn(RF_BT1, connected=0, paired=1,
                              pairing_active=1, counter=counter)
@@ -316,19 +325,20 @@ class TestFnChannelIndicator(unittest.TestCase):
         finally:
             sim.close()
 
-    def test_slow_blink_without_fn(self):
-        """A selected channel with no link slow-blinks without Fn, so a
+    def test_paired_reconnect_solid_without_fn(self):
+        """A bound channel with no link shows solid blue even without Fn, so a
         reconnect stays visible until it succeeds."""
         sim = RgbSim()
         try:
+            sim.set_settings(FX_OFF, brightness=255)  # isolate the overlay
             sim.stage_fn(RF_BT1, connected=0, paired=1, pairing_active=0,
                          counter=FN_BLINK_SLOW, fn_held=0)
             self.assertEqual(sim.fb_blue(FN_ROW, Q_COL), 255,
-                             "reconnect slow blink ON without Fn")
+                             "reconnect solid without Fn")
             sim.stage_fn(RF_BT1, connected=0, paired=1, pairing_active=0,
                          counter=0, fn_held=0)
-            self.assertEqual(sim.fb_blue(FN_ROW, Q_COL), 0,
-                             "reconnect slow blink OFF without Fn")
+            self.assertEqual(sim.fb_blue(FN_ROW, Q_COL), 255,
+                             "reconnect stays solid across the counter")
         finally:
             sim.close()
 
@@ -337,7 +347,7 @@ class TestFnChannelIndicator(unittest.TestCase):
         when Fn is not held."""
         sim = RgbSim()
         try:
-            sim.set_settings(FX_SOLID_RED, brightness=255)
+            sim.set_settings(FX_SOLID, brightness=255, color=PAL_RED)
             sim.stage_fn(RF_BT1, connected=1, paired=1, pairing_active=0,
                          counter=0, fn_held=0)
             self.assertEqual(sim.fb_rgb(FN_ROW, Q_COL), [255, 0, 0],
@@ -365,7 +375,7 @@ class TestFnChannelIndicator(unittest.TestCase):
         the matrix, the effect keeps running underneath."""
         sim = RgbSim()
         try:
-            sim.set_settings(FX_SOLID_RED, brightness=255)
+            sim.set_settings(FX_SOLID, brightness=255, color=PAL_RED)
             sim.stage_fn(RF_BT1, connected=1, paired=1, pairing_active=0, counter=0)
             self.assertEqual(sim.fb_rgb(0, 0), [255, 0, 0],
                              "Esc keeps the effect while Fn is held")
@@ -378,7 +388,7 @@ class TestFnChannelIndicator(unittest.TestCase):
         """N lights white for NKRO while Fn is held, like the channel overlay."""
         sim = RgbSim()
         try:
-            sim.set_settings(FX_SOLID_RED, brightness=255)
+            sim.set_settings(FX_SOLID, brightness=255, color=PAL_RED)
             sim.stage_fn(RF_BT1, connected=1, paired=1, pairing_active=0, counter=0)
             self.assertEqual(sim.fb_rgb(3, 6), [255, 255, 255],
                              "N lights white for NKRO while Fn is held")
@@ -391,7 +401,7 @@ class TestFnChannelIndicator(unittest.TestCase):
     def test_nkro_indicator_off_when_nkro_disabled(self):
         sim = RgbSim()
         try:
-            sim.set_settings(FX_SOLID_RED, brightness=255)
+            sim.set_settings(FX_SOLID, brightness=255, color=PAL_RED)
             sim.kb.set_xram(sim.kb._a("keymap_config"), [0])  # NKRO off
             sim.stage_fn(RF_BT1, connected=1, paired=1, pairing_active=0, counter=0)
             self.assertEqual(sim.fb_rgb(3, 6), [255, 0, 0],
@@ -423,7 +433,7 @@ class TestEffectControls(unittest.TestCase):
     def test_next_effect_cycles_and_wraps(self):
         sim = RgbSim()
         try:
-            sim.kb.set_xram(sim.kb._a("user_settings"), [FX_SOLID_RED, 255, 4])
+            sim.kb.set_xram(sim.kb._a("user_settings"), [FX_TWINKLE, 255, 4])
             sim.kb.call(sim.kb._a("indicators_next_effect"))
             self.assertEqual(self._settings(sim)[0], FX_OFF)
             sim.kb.call(sim.kb._a("indicators_next_effect"))
@@ -443,7 +453,7 @@ class TestEffectControls(unittest.TestCase):
     def test_brightness_clamps_at_both_ends(self):
         sim = RgbSim()
         try:
-            sim.kb.set_xram(sim.kb._a("user_settings"), [FX_SOLID_RED, 255, 4])
+            sim.kb.set_xram(sim.kb._a("user_settings"), [FX_SOLID, 255, 4])
             sim.kb.call(sim.kb._a("indicators_brightness_up"))
             self.assertEqual(self._settings(sim)[1], 255)
             sim.kb.set_xram(sim.kb._a("user_settings") + 1, [0])
@@ -455,7 +465,7 @@ class TestEffectControls(unittest.TestCase):
     def test_speed_clamps_at_both_ends(self):
         sim = RgbSim()
         try:
-            sim.kb.set_xram(sim.kb._a("user_settings"), [FX_SOLID_RED, 255, 16])
+            sim.kb.set_xram(sim.kb._a("user_settings"), [FX_SOLID, 255, 16])
             sim.kb.call(sim.kb._a("indicators_speed_up"))
             self.assertEqual(self._settings(sim)[2], 16)
             sim.kb.set_xram(sim.kb._a("user_settings") + 2, [1])

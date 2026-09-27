@@ -277,6 +277,35 @@ selected column is driven LOW to source current into its row's sinks, and the
 other columns idle HIGH. (The original trace had this inverted, which lit the
 whole row except the selected key.)
 
+### Effects
+
+SMK keeps the stock's architecture — a per-key framebuffer (`led_fb`) filled by
+a procedural writer (`led_effect_rgb_colored`), then rendered to the PWM DUTY2
+registers. The stock dispatches a handful of procedural writers by an effect
+index at XRAM `0x086c`; SMK uses the `led_effect_t` enum instead.
+
+`Fn`+`\` cycles these effects, in order:
+
+| # | Effect | Notes |
+| --- | --- | --- |
+| 0 | `FX_RADIAL` | rainbow rings from the centre |
+| 1 | `FX_HORIZONTAL` | rainbow wave across columns |
+| 2 | `FX_VERTICAL` | rainbow wave across rows |
+| 3 | `FX_SOLID` | static, colourable (`Fn`+`.`) |
+| 4 | `FX_BREATHING` | palette colour pulsing in/out |
+| 5 | `FX_RAINBOW` | whole board cycling the wheel |
+| 6 | `FX_SNAKE` | bright band sweeping the columns |
+| 7 | `FX_KNIGHT` | bright segment bouncing left/right |
+| 8 | `FX_GRADIENT` | static colour ramp across the board |
+| 9 | `FX_TWINKLE` | pseudo-random per-key flicker |
+| — | off | |
+
+The effects are pure functions of `(row, col, phase, brightness, color)`, so
+none need per-key state (important on the RAM-tight 8051). The colour palette
+(10 slots, `Fn`+`.`) uses the QMK standard RGB values, with white as slot 0.
+Vial's lighting tab can set brightness, effect, speed and colour through the
+`VIA_CHANNEL_RGB_MATRIX` custom values (`src/smk/vial.c`).
+
 Backlight and function controls follow the RK61 Plus manual:
 
 | Keys | Action |
