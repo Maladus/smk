@@ -57,10 +57,13 @@ static uint8_t abs_diff(uint8_t a, uint8_t b)
 }
 
 // Cheap positional hash for twinkle: stable per (row, col, phase) bucket, so a
-// key flickers on/off as the phase advances without any per-key state.
+// key flickers on/off as the phase advances without any per-key state. The
+// bucket is coarse (phase >> TWINKLE_SHIFT) so the flicker is a calm twinkle
+// rather than a fast strobe.
+#define TWINKLE_SHIFT 6u
 static uint8_t twinkle_hash(uint8_t row, uint8_t col, uint8_t phase)
 {
-    return (uint8_t)((uint8_t)(row * 31u) + (uint8_t)(col * 17u) + (uint8_t)((uint8_t)(phase >> 3) * 7u));
+    return (uint8_t)((uint8_t)(row * 31u) + (uint8_t)(col * 17u) + (uint8_t)((uint8_t)(phase >> TWINKLE_SHIFT) * 7u));
 }
 
 uint8_t led_effect_index(led_effect_t fx, uint8_t row, uint8_t col, uint8_t phase)
