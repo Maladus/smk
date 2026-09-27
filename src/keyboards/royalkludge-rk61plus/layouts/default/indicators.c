@@ -67,7 +67,12 @@ static uint8_t led_fb[LED_ROWS][3][LED_COLS];
 
 static uint8_t led_col;
 static uint8_t led_phase;
-static uint8_t regen_row;
+// Fractional phase accumulator: led_phase advances by led_speed/2^SHIFT per
+// frame, so the slow end of the speed range is genuinely slow (a full wheel at
+// speed 1 takes 2^SHIFT times longer than a 1-unit step).
+#define LED_PHASE_SHIFT 2u
+static uint16_t led_phase_acc;
+static uint8_t  regen_row;
 static uint8_t regen_col;
 
 static uint8_t anim_ctr;
@@ -185,6 +190,7 @@ void indicators_start(void)
 {
     led_col              = 0;
     led_phase            = 0;
+    led_phase_acc        = 0;
     regen_row            = 0;
     regen_col            = 0;
     anim_ctr             = 0;
@@ -204,8 +210,9 @@ bool indicators_update_step(keyboard_state_t *keyboard, uint8_t current_step)
     current_step;
 
     if (++anim_ctr >= LED_COLS) {
-        anim_ctr  = 0;
-        led_phase = (uint8_t)(led_phase + user_settings.led_speed);
+        anim_ctr = 0;
+        led_phase_acc = (uint16_t)((led_phase_acc + user_settings.led_speed) & ((1u << (8u + LED_PHASE_SHIFT)) - 1u));
+        led_phase     = (uint8_t)(led_phase_acc >> LED_PHASE_SHIFT);
         status_pulse_counter++;
         led_effect_reactive_tick(); // decay the key-press effect intensities
         render_dirty = true;        // animation and/or Fn indicator advanced
