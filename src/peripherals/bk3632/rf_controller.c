@@ -67,13 +67,8 @@ void rf_init()
 {
     uint8_t status_bytes[2];
 
-    delay_ms(255);
-    delay_ms(255);
-    delay_ms(255);
-    delay_ms(255);
-    delay_ms(255);
-    delay_ms(255);
-
+    // No blind fixed wait: the host's USB enumeration must not sit behind the
+    // radio coming up. Wake the part and poll until it reports ready.
     for (uint8_t tries = 10; tries > 0; tries--) {
         rf_wake_nudge();
         delay_ms(tries);
@@ -111,6 +106,15 @@ void rf_factory_reset_bonds(void)
     delay_ms(200);
     rf_init(); // reload BT names cleared by the wipe + sleep cycle
     delay_ms(200);
+}
+
+// Clear the stored BT bonds so the next pairing adopts a new host instead of
+// re-adopting the old bond. Lighter than rf_factory_reset_bonds(): no
+// sleep/re-init cycle, so it is cheap enough for a long-press pairing.
+void rf_wipe_bonds(void)
+{
+    rf_cmd_03(3); // wipe stored bonds (stock 0xABD2 uses param 3, not 2)
+    delay_ms(100);
 }
 
 uint8_t kro6buffer[6];
@@ -196,13 +200,16 @@ bool rf_update_keyboard_state(keyboard_state_t *keyboard)
     return true;
 }
 
-#define RF_SUPERVISOR_TICK_INTERVAL 2000u
+// Poll often enough that connect/disconnect is reflected promptly, and seed the
+// counter so the very first kb_update() reads the status instead of waiting a
+// full interval - the boot-time USB fallback must not depend on a delayed poll.
+#define RF_SUPERVISOR_TICK_INTERVAL 500u
 #define RF_PAIRING_WINDOW_POLLS     600u
 
 static uint8_t  commanded_link       = RF_MODE_2_4G;
 static uint16_t pairing_window_polls = 0;
 
-static uint16_t supervisor_ticks      = 0;
+static uint16_t supervisor_ticks      = RF_SUPERVISOR_TICK_INTERVAL;
 static uint8_t  supervisor_was_paired = 0;
 
 void rf_link_supervisor(keyboard_state_t *keyboard)
@@ -275,41 +282,18 @@ void rf_blanking_tick(void)
     rf_send_kro_report(buf);
     blanking_active = false;
 }
-static uint8_t pairing_status_bytes[2];
-static uint8_t pairing_paired_now;
-
-void rf_set_link_pairing(rf_mode_t link, __xdata keyboard_state_t *keyboard)
+// Put the radio into pairing mode for `link`. Fire-and-forget, matching the
+// stock pairing path (0xAA14): the BK3632 owns the pairing exchange, and
+// rf_link_supervisor() reads the resulting status and re-asserts the link once
+// it reports paired. The old bond is wiped by the caller before this runs.
+void rf_set_link_pairing(rf_mode_t link)
 {
     commanded_link = (uint8_t)link;
 
     rf_set_link_mode(link, 1);
-
-    pairing_paired_now = 0;
-    delay_ms(100);
-    for (uint8_t tries = 10; tries > 0; tries--) {
-        rf_wake_nudge();
-        delay_ms(10);
-        if (rf_get_status(pairing_status_bytes) && (pairing_status_bytes[0] & 0x80)) {
-            keyboard->battery_level = pairing_status_bytes[0] & 0x07;
-            keyboard->led_state     = pairing_status_bytes[1] & ((1 << 0) | (1 << 1) | (1 << 2));
-            keyboard->connected     = (pairing_status_bytes[1] >> 3) & 1;
-            keyboard->paired        = (pairing_status_bytes[1] >> 4) & 1;
-            keyboard->low_power     = (pairing_status_bytes[1] >> 7) & 1;
-            keyboard->rf_link       = ((pairing_status_bytes[1] & ((1 << 5) | (1 << 6))) >> 5);
-            if (keyboard->paired) {
-                pairing_paired_now = 1;
-                break;
-            }
-        }
-        delay_ms(20);
-    }
-
-    if (pairing_paired_now) {
-        delay_ms(50);
-        rf_reassert_link(link);
-    } else {
-        pairing_window_polls = RF_PAIRING_WINDOW_POLLS;
-    }
+    // Hold off the supervisor's pairing=0 re-assert so the pairing window is not
+    // cut short before the new host is adopted.
+    pairing_window_polls = RF_PAIRING_WINDOW_POLLS;
 }
 
 bool rf_get_status(uint8_t status_bytes[2])

@@ -24,10 +24,11 @@ void rf_kbd_lazy_state_init(void);
 bool rf_update_keyboard_state(keyboard_state_t *keyboard);
 void rf_link_supervisor(keyboard_state_t *keyboard);
 void rf_set_link(rf_mode_t link);
-void rf_set_link_pairing(rf_mode_t link, __xdata keyboard_state_t *keyboard);
+void rf_set_link_pairing(rf_mode_t link);
 void rf_reassert_link(rf_mode_t link);
 void rf_apply_usb_mode(void);
 void rf_factory_reset_bonds(void);
+void rf_wipe_bonds(void);
 
 void rf_set_mac_mode_compat(bool is_mac);
 void rf_byte9_set_disable(bool on);

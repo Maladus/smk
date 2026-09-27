@@ -745,7 +745,6 @@ static void usb_set_address_handler(struct usb_req_setup *req)
     received_usb_addr = req->wValue;
 
     CLEAR_EP0_CNT;
-    SET_EP0_OUT_STALL;
     SET_EP0_IN_RDY;
 }
 
@@ -1192,6 +1191,10 @@ void usb_ep0_in_irq()
         SET_EP0_IN_STALL;
         SET_EP0_OUT_RDY;
 
+        // Stock commits the address in the EP0 IN (status-stage) handler, not in
+        // the setup handler (Function_118 at 0xA8FE is reached from IEP0IF and
+        // does MOV USBADDR,A at 0xA941). Committing it any earlier leaves the
+        // SIE unaddressed during the status stage and wedges host enumeration.
         USBADDR = received_usb_addr;
     }
 }

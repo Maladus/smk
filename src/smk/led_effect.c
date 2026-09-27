@@ -39,6 +39,12 @@ bool led_effect_rgb(led_effect_t fx, uint8_t row, uint8_t col, uint8_t phase, ui
         out[0] = out[1] = out[2] = brightness; // white
         return true;
     }
+    if (fx == FX_SOLID_RED) {
+        out[0] = brightness; // red
+        out[1] = 0;
+        out[2] = 0;
+        return true;
+    }
     if (fx >= FX_OFF) {
         return false;
     }
@@ -52,6 +58,10 @@ bool led_effect_rgb(led_effect_t fx, uint8_t row, uint8_t col, uint8_t phase, ui
 bool led_effect_mono(led_effect_t fx, uint8_t row, uint8_t col, uint8_t phase, uint8_t *out)
 {
     if (fx == FX_SOLID) {
+        *out = 255; // static full brightness
+        return true;
+    }
+    if (fx == FX_SOLID_RED) {
         *out = 255; // static full brightness
         return true;
     }

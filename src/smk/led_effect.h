@@ -6,7 +6,8 @@ typedef enum {
     FX_RADIAL = 0, // rings radiating from the centre
     FX_HORIZONTAL, // wave across columns
     FX_VERTICAL,   // wave across rows
-    FX_SOLID,      // static (no animation)
+    FX_SOLID,      // static white (no animation)
+    FX_SOLID_RED,  // static red (no animation)
     FX_COUNT
 } led_effect_t;
 

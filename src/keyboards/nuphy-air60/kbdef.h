@@ -141,6 +141,16 @@ uint8_t layout_os_base_layer(bool is_mac);
 #define KB_WAKE_P4_1        _P4_1
 #define RF_BB_SPI_ACK_P4_2  _P4_2
 
+// Port/mask descriptors consumed by the shared bb_spi.c bit-bang driver.
+#define RF_BB_SPI_CS_PORT   7
+#define RF_BB_SPI_CS_MASK   RF_BB_SPI_CS_P7_4
+#define RF_BB_SPI_SCK_PORT  4
+#define RF_BB_SPI_SCK_MASK  RF_BB_SPI_SCK_P4_7
+#define RF_BB_SPI_MOSI_PORT 0
+#define RF_BB_SPI_MOSI_MASK RF_BB_SPI_MOSI_P0_7
+#define RF_BB_SPI_MOT_PORT  0
+#define RF_BB_SPI_MOT_MASK  RF_BB_SPI_MOT_P0_5
+
 enum custom_keycodes {
     LNK_24G = SAFE_RANGE,
     LNK_BT1,

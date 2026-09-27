@@ -230,6 +230,21 @@ class TestEnumerationThroughInit(unittest.TestCase):
         self.assertEqual(SIM.dump_value(out, SIM.USB_DEVICE_STATE), SIM.STATE_CONFIGURED,
                          "SET_ADDRESS then SET_CONFIGURATION must reach CONFIGURED")
 
+    def test_set_address_then_configuration_reaches_configured(self):
+        """Stock commits USBADDR in the EP0 IN (status-stage) handler
+        (Function_118 at 0xA8FE, reached from IEP0IF, MOV USBADDR,A at 0xA941),
+        not in the setup handler. A SET_ADDRESS -> SET_CONFIGURATION sequence
+        must still leave the SIE address and the firmware bookkeeping set; if the
+        commit never ran, SET_CONFIGURATION would see received_usb_addr == 0 and
+        STALL (host error -32)."""
+        out = SIM.boot_enumerate(set_address(0x2A), set_configuration(1))
+        self.assertEqual(SIM.dump_value(out, SIM.USBADDR), 0x2A,
+                         "SET_ADDRESS must commit the address to USBADDR")
+        self.assertNotEqual(SIM.dump_value(out, SIM.RECEIVED_USB_ADDR), 0,
+                            "received_usb_addr must be non-zero after SET_ADDRESS")
+        self.assertEqual(SIM.dump_value(out, SIM.USB_DEVICE_STATE), SIM.STATE_CONFIGURED,
+                         "SET_CONFIGURATION must reach CONFIGURED (not STALL)")
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -21,12 +21,12 @@ import subprocess
 import threading
 import time
 
-from sim import find_firmware, find_sim, load_symbols
+from sim import find_firmware, find_sim, load_symbols, read_intel_hex
 from pathlib import Path
 
 # --- Air60 matrix wiring (src/keyboards/nuphy-air60/kbdef.h) ----------------
 # P-register SFR addresses (src/sino51lib/sh68f90/sh68f90.h).
-P1, P2, P3, P5, P7 = 0x90, 0x98, 0xa0, 0x88, 0xf8
+P0, P1, P2, P3, P4, P5, P6, P7 = 0x80, 0x90, 0x98, 0xa0, 0xb0, 0x88, 0xc0, 0xf8
 
 # Columns are driven low one at a time; each pressed key shorts its column to
 # its row, so the row reads low while that column is driven.
@@ -35,6 +35,13 @@ COL_PIN = {0: (P5, 0), 1: (P5, 1), 2: (P5, 2),
            9: (P2, 5), 10: (P2, 4), 11: (P2, 3), 12: (P2, 2), 13: (P2, 1), 14: (P2, 0),
            15: (P1, 5)}
 ROW_PIN = {0: (P7, 1), 1: (P7, 2), 2: (P7, 3), 3: (P5, 3), 4: (P5, 4)}
+
+# --- RK61 Plus matrix wiring (src/keyboards/royalkludge-rk61plus/kbdef.h) ---
+# Columns C0-C7 = P6.0-7, C8-C10 = P5.0-2, C11 = P5.7, C12 = P4.0, C13 = P4.2;
+# rows are the same as the Air60 (R0-R2 = P7.1-3, R3 = P5.3, R4 = P5.4).
+RK61_COL_PIN = {0: (P6, 0), 1: (P6, 1), 2: (P6, 2), 3: (P6, 3), 4: (P6, 4), 5: (P6, 5), 6: (P6, 6), 7: (P6, 7),
+                8: (P5, 0), 9: (P5, 1), 10: (P5, 2), 11: (P5, 7), 12: (P4, 0), 13: (P4, 2)}
+RK61_ROW_PIN = {0: (P7, 1), 1: (P7, 2), 2: (P7, 3), 3: (P5, 3), 4: (P5, 4)}
 
 
 class UcsimSession:
@@ -175,13 +182,13 @@ class UcsimSession:
     def set_sfr(self, addr, val):
         self.cmd("set mem sfr 0x%02x 0x%02x" % (addr, val))
 
-    # Staging cells the SH68F90 model reads as the external pin level of P5 / P7
-    # (see sh68f90.cc). Writing here drives the pins the board would drive.
-    PIN_STAGE = {P5: 0x1F15, P7: 0x1F17}
+    # Staging cells the SH68F90 model reads as the external pin level of P0 / P5 /
+    # P7 (see sh68f90.cc). Writing here drives the pins the board would drive.
+    PIN_STAGE = {P0: 0x1F16, P5: 0x1F15, P7: 0x1F17}
 
     def set_pin(self, port, level):
         """Set the external level the board presents on `port`'s pins (input bits
-        read this; idle high == pull-ups). `port` is the SFR address (P5/P7)."""
+        read this; idle high == pull-ups). `port` is the SFR address (P0/P5/P7)."""
         self.cmd("set mem xram 0x%x 0x%02x" % (self.PIN_STAGE[port], level))
 
     def get_xram(self, addr, n=1):
@@ -386,15 +393,19 @@ class Air60Sim(UcsimSession):
 
 
 class KeyMatrix:
-    """The Air60 key matrix, emulated test-side. Holds the set of pressed
+    """A keyboard's key matrix, emulated test-side. Holds the set of pressed
     (col, row) keys and, whenever the firmware is reading the rows, drives the
     external pin levels: each row idles high (pull-up) and is pulled low only if
-    a pressed key on the currently-scanned column shorts it there. Also presents
-    the CONN_MODE switch (P5.5: 1=USB, 0=RF) via `usb_mode`."""
+    a pressed key on the currently-scanned column shorts it there. `col_pin` /
+    `row_pin` map matrix positions to (SFR address, bit); they default to the
+    Air60 wiring. The Air60 CONN_MODE switch (P5.5: 1=USB, 0=RF) is presented
+    via `usb_mode`."""
 
-    def __init__(self):
+    def __init__(self, col_pin=None, row_pin=None):
         self.pressed = set()
         self.usb_mode = True
+        self.col_pin = COL_PIN if col_pin is None else col_pin
+        self.row_pin = ROW_PIN if row_pin is None else row_pin
 
     def press(self, col, row):
         self.pressed.add((col, row))
@@ -406,7 +417,7 @@ class KeyMatrix:
         self.pressed.clear()
 
     def _col_driven_low(self, sess, col, port_cache):
-        sfr, bit = COL_PIN[col]
+        sfr, bit = self.col_pin[col]
         v = port_cache.get(sfr)
         if v is None:
             v = port_cache[sfr] = sess.get_sfr(sfr) or 0
@@ -425,7 +436,7 @@ class KeyMatrix:
         p7 = 0xFF
         for r in (0, 1, 2):
             if r in low_rows:
-                p7 &= ~(1 << ROW_PIN[r][1])
+                p7 &= ~(1 << self.row_pin[r][1])
         sess.set_pin(P7, p7)
         # P5 pin level: rows R3-R4 = bits 3-4; bit5 = CONN_MODE (1=USB, 0=RF)
         p5 = 0xFF
@@ -433,5 +444,141 @@ class KeyMatrix:
             p5 &= ~0x20
         for r in (3, 4):
             if r in low_rows:
-                p5 &= ~(1 << ROW_PIN[r][1])
+                p5 &= ~(1 << self.row_pin[r][1])
         sess.set_pin(P5, p5)
+
+
+class Rk61Sim(UcsimSession):
+    """A UcsimSession wired up as the RK61 Plus board. The simulator exposes the
+    GPIO ports and the test drives the key matrix (KeyMatrix with RK61 maps); the
+    boot/park port values are read straight back from the SFR cells.
+
+    P0/P5/P7 are read direction-aware by the simulator: an input bit returns the
+    staged external pin level (idle-high pull-ups), not the latch. P4 still reads
+    its latch. The boot/park assertions therefore check each port's output bits
+    only."""
+
+    # P0 output bits checked at boot and after park. P0.4 (MOSI) is masked out:
+    # the RF bring-up bit-bangs it and leaves it a released-high input, so it no
+    # longer reads its boot latch. Boot keeps P0.2 (WAKE) + P0.5 (enable) high;
+    # park leaves only P0.2 (WAKE) high among the checked bits.
+    P0_OUT_BOOT = 0x24
+    P0_OUT_PARK = 0xE7
+
+    # P7CR at boot (P7.4 enable + P7.6 control are outputs) and after park
+    # (P7.0 parked-only + P7.4 enable + P7.6/P7.7 control are outputs).
+    P7_OUT_BOOT = 0x50
+    P7_OUT_PARK = 0xD1
+
+    def __init__(self, firmware=None, sim=None):
+        super().__init__(firmware, sim)
+        self.sym = load_symbols(Path(self.firmware).with_suffix(".map"))
+        self.matrix = KeyMatrix(RK61_COL_PIN, RK61_ROW_PIN)
+
+    def _a(self, name):
+        # Firmware built before this symbol exists cannot exercise the path that
+        # needs it; skip rather than fail so the harness can land ahead of it.
+        if name not in self.sym:
+            raise unittest.SkipTest(f"firmware has no {name} yet")
+        return self.sym[name]
+
+    def boot(self):
+        """Boot from reset to the main loop (kb_update_switches). Only the
+        calibrated delay loops are skipped; P0/P4/P7 are then at their stock boot
+        values set by user_init()."""
+        self.cmd("reset")
+        self.cmd("set mem rom 0x%x 0x22" % self._a("delay_us"))   # RET
+        self.cmd("set mem rom 0x%x 0x22" % self._a("delay_ms"))   # RET
+        self.brk(self._a("kb_update_switches"))
+        self.run()
+        self.cmd("delete")
+
+    def ports(self):
+        """(P0, P4, P7) SFR values, as `dump sfr` reports them."""
+        return self.get_sfr(P0), self.get_sfr(P4), self.get_sfr(P7)
+
+    def park(self):
+        """Cold-invoke user_sleep_prepare() (park_panel + INT4 wake arm) and
+        return (P0, P4, P7) once it returns. A return frame is staged on the
+        firmware's stack so the function RETs onto a NOP sled at 0x9000."""
+        self.cmd("set mem rom 0x9000 " + " ".join(["0x00"] * 16))
+        self.cmd("set mem iram 0x86 0x00")   # return low byte
+        self.cmd("set mem iram 0x87 0x90")   # return high byte -> 0x9000
+        self.set_sfr(0x81, 0x87)             # SP
+        self.cmd("pc 0x%x" % self._a("user_sleep_prepare"))
+        self.brk(0x9000)
+        self.run()
+        self.cmd("delete")
+        return self.ports()
+
+    def set_xram(self, addr, data):
+        """Write `data` (a byte list) to xdata starting at `addr`."""
+        self.cmd("set mem xram 0x%x %s" % (addr, " ".join("0x%02x" % b for b in data)))
+
+    def call(self, addr):
+        """Cold-invoke the C function at `addr` and return once it RETs onto a
+        NOP sled at 0x9000. The sled is re-staged each call, so a function can be
+        invoked repeatedly against the same session."""
+        self.cmd("set mem rom 0x9000 " + " ".join(["0x00"] * 16))
+        self.cmd("set mem iram 0x86 0x00")   # return low byte
+        self.cmd("set mem iram 0x87 0x90")   # return high byte -> 0x9000
+        self.set_sfr(0x81, 0x87)             # SP
+        self.cmd("pc 0x%x" % addr)
+        self.brk(0x9000)
+        self.run()
+        self.cmd("delete")
+
+    def _static(self, module, name):
+        """Address of a module-static symbol. SDCC mangles file-scope statics as
+        F<module>$<name> with an optional $<scope> suffix; load_symbols' leading-
+        underscore match skips them, so resolve the map line directly."""
+        pat = re.compile(r"^[A-Z]:\s+([0-9A-Fa-f]+)\s+F%s\$%s(?:\$[0-9_$]*)?\s"
+                         % (re.escape(module), re.escape(name)))
+        with open(Path(self.firmware).with_suffix(".map")) as f:
+            for line in f:
+                m = pat.match(line)
+                if m:
+                    return int(m.group(1), 16)
+        raise KeyError("%s$%s not found in .map" % (module, name))
+
+    def battery_loop_addr(self):
+        """Address of the `JNB P0.0` count-loop head inside user_battery_measure()
+        (opcode 0x30 0x80). The loop is the RC sense-flip detector; breaking here
+        lets a test flip the staged P0.0 level after a scripted number of turns."""
+        mem = read_intel_hex(self.firmware)
+        base = self._a("user_battery_measure")
+        for off in range(0x100):
+            a = base + off
+            if mem.get(a) == 0x30 and mem.get(a + 1) == 0x80:  # JNB P0.0, rel
+                return a
+        raise unittest.SkipTest("JNB P0.0 count loop not found in user_battery_measure")
+
+    def battery_level_after(self, flip_after):
+        """Invoke user_battery_measure() with P0.0 staged high, flip P0.0 low after
+        `flip_after` count-loop turns, and return (battery_level, low_power) from
+        keyboard_state. The delay loops are patched to RET and a return frame is
+        staged so the function RETs onto the NOP sled at 0x9000."""
+        self.cmd("reset")
+        self.cmd("set mem rom 0x%x 0x22" % self._a("delay_us"))   # RET
+        self.cmd("set mem rom 0x%x 0x22" % self._a("delay_ms"))   # RET
+        self.set_pin(P0, 0xFF)                # sense pin P0.0 idles high
+        self.cmd("set mem rom 0x9000 " + " ".join(["0x00"] * 16))
+        self.cmd("set mem iram 0x86 0x00")
+        self.cmd("set mem iram 0x87 0x90")
+        self.set_sfr(0x81, 0x87)              # SP
+        self.cmd("pc 0x%x" % self._a("user_battery_measure"))
+
+        loop = self.battery_loop_addr()
+        self.brk(loop)
+        for _ in range(flip_after + 1):       # reach the loop, then flip_after turns
+            self.run()
+        self.set_pin(P0, 0xFE)                # flip P0.0 low; next check exits
+        self.cmd("delete")                    # drop the loop breakpoint
+
+        self.brk(0x9000)
+        self.run()                            # loop exits; RETs onto the sled
+        self.cmd("delete")
+
+        state = self._a("keyboard_state")
+        return (self.get_xram(state + 2, 1)[0],   # battery_level
+                self.get_xram(state + 3, 1)[0])   # low_power

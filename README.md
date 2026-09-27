@@ -24,6 +24,7 @@ You can very easily end up with a bricked device if the written firmware can't j
 | E-YOOSO Z11 | SH68F90A / BYK901 | N/A | | [Details](docs/keyboards/eyooso-z11.md) |
 | Genesis Thor 300 | SH68F881 / BYK801 | N/A | | [Details](docs/keyboards/genesis-thor-300.md) |
 | CIY X77 | SH68F89 / BYK816 | N/A | External 24Cxx EEPROM | [Details](docs/keyboards/ciy-x77.md) |
+| Royal Kludge RK61 Plus | SH68F90A / BYK916 | 2.4G, BT | | [Details](docs/keyboards/royalkludge-rk61plus.md) |
 
 Platform notes: [SH68F90 / SH68F90A](docs/platforms/sh68f90.md), [SH68F881](docs/platforms/sh68f881.md), [SH68F89](docs/platforms/sh68f89.md).
 
@@ -36,6 +37,25 @@ Platform notes: [SH68F90 / SH68F90A](docs/platforms/sh68f90.md), [SH68F881](docs
 Currently, this project is primarily developed with the help of [Nix](https://nixos.org/) and Nix flakes. Please consider using Nix and the provided [flake](https://github.com/carlossless/smk/blob/master/flake.nix) to automatically set up a reproducible development environment.
 
 With Nix installed and flakes enabled, use `nix develop` or [direnv](https://direnv.net/) to enter a shell with all prerequisites installed.
+
+#### mise
+
+As an alternative to Nix, [mise](https://mise.jdx.dev/) can install the whole
+toolchain directly (SDCC, Meson/Ninja, sinowisp, and the patched ucsim simulator)
+and adds shortcuts for the common build and test commands:
+
+```sh
+mise trust                                          # once, to allow the project config
+mise install                                        # install SDCC, Meson, sinowisp, ...
+mise run build                                      # build all firmware targets
+mise run build nuphy-air60_default_smk.hex          # build a single target
+mise run usim                                       # build the reference firmware and run the simulator tests
+```
+
+`mise run usim` builds the patched `ucsim-sh68f90` simulator from the SDCC source
+on first use (a minute or so); that step needs a host C++ toolchain
+(`build-essential` on Debian/Ubuntu) plus `curl`, `tar` and `patch`. See
+`mise.toml` for the task definitions.
 
 ### Building & Flashing
 

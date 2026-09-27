@@ -1,0 +1,165 @@
+# mise-en-place config for SMK.
+#
+# `mise install` sets up the firmware toolchain without Nix: SDCC, Meson/Ninja,
+# Python, the sinowisp flasher and the patched ucsim simulator used by the
+# simulator tests. The tasks below wrap the common build/test commands.
+
+[tools]
+# --- firmware build ---
+"http:sdcc" = { version = "4.5.0", url = "https://downloads.sourceforge.net/project/sdcc/sdcc-linux-amd64/{{ version }}/sdcc-{{ version }}-amd64-unknown-linux2.5.tar.bz2" }
+meson = "1.12.0"
+ninja = "1.13.2"
+python = "3.14"
+
+# --- flashing ---
+"github:carlossless/sinowisp" = "2.1.0"
+
+# --- formatting (matches clang-tools 22 in the Nix dev shell) ---
+"conda:clang-format" = "22.1.8"
+
+# --- building the patched ucsim simulator (`setup-ucsim`) ---
+"conda:flex" = "2.6.4"
+"conda:bison" = "3.8.2"
+
+[env]
+# `setup-ucsim` installs the patched simulator here; puts it on PATH so the
+# simulator tests pick it up.
+_.path = ".mise/ucsim/bin"
+
+[tasks.setup]
+description = "Configure the Meson build directory"
+run = '''
+#!/usr/bin/env bash
+set -euo pipefail
+if [[ -f build/build.ninja ]]; then
+    echo "build/ already configured (meson setup skipped)"
+else
+    meson setup build
+fi
+'''
+
+[tasks.setup-ucsim]
+description = "Build the patched ucsim-sh68f90 simulator from SDCC 4.5.0 source"
+run = '''
+#!/usr/bin/env bash
+set -euo pipefail
+
+version=4.5.0
+root="$PWD"
+work="$root/.mise/ucsim"
+bin="$work/bin/ucsim-sh68f90"
+
+if [[ -x "$bin" ]]; then
+    echo "ucsim-sh68f90 already built"
+    exit 0
+fi
+
+mkdir -p "$work/bin"
+cd "$work"
+
+tarball="sdcc-src-$version.tar.bz2"
+if [[ ! -f "$tarball" ]]; then
+    echo "downloading SDCC $version source..."
+    curl -fL -o "$tarball" \
+        "https://downloads.sourceforge.net/project/sdcc/sdcc/$version/$tarball"
+fi
+[[ -d "sdcc-$version" ]] || tar xjf "$tarball"
+
+cd "sdcc-$version"
+if [[ ! -f sim/ucsim/src/sims/s51.src/sh68f90.cc ]]; then
+    patch -p1 --forward < "$root/tools/ucsim/sh68f90-register.patch"
+    cp "$root/tools/ucsim/sh68f90.cc"  sim/ucsim/src/sims/s51.src/sh68f90.cc
+    cp "$root/tools/ucsim/sh68f90cl.h" sim/ucsim/src/sims/s51.src/sh68f90cl.h
+fi
+
+cd sim/ucsim
+flex -o src/core/cmd.src/cmdlex.cc src/core/cmd.src/cmdlex.l
+./configure \
+    --enable-avr-sim=no     --enable-f8-sim=no     --enable-i8048-sim=no \
+    --enable-i8085-sim=no   --enable-m6800-sim=no  --enable-m6809-sim=no \
+    --enable-m68hc08-sim=no --enable-m68hc11-sim=no --enable-m68hc12-sim=no \
+    --enable-mos6502-sim=no --enable-oisc-sim=no   --enable-p1516-sim=no \
+    --enable-pblaze-sim=no  --enable-pdk-sim=no    --enable-rxk-sim=no \
+    --enable-st7-sim=no     --enable-stm8-sim=no   --enable-tlcs-sim=no \
+    --enable-xa-sim=no      --enable-z80-sim=no > /dev/null
+make -j"$(nproc)"
+
+cp src/sims/s51.src/ucsim_51 "$bin"
+echo "installed $bin"
+'''
+
+[tasks.build]
+description = "Build all firmware targets (or pass Meson target names to build a subset)"
+depends = ["setup"]
+run = '''
+#!/usr/bin/env bash
+set -euo pipefail
+meson compile -C build "$@"
+'''
+
+[tasks.usim]
+description = "Build the reference firmware and run the uCsim simulator test suite"
+depends = ["setup", "setup-ucsim"]
+run = '''
+#!/usr/bin/env bash
+set -euo pipefail
+# Reconfigure so Meson picks up ucsim-sh68f90 now that it is on PATH.
+meson setup --reconfigure build > /dev/null
+meson compile -C build nuphy-air60_default_smk.hex
+meson test -C build sim-tests --print-errorlogs
+'''
+
+# ICP flashing over the sinodude-serial Arduino programmer. Needs `sinodude` on
+# PATH. Unlike sinowisp (which writes the firmware region only), this writes the
+# code flash exactly as the given Intel HEX describes, so it can restore or
+# replace the bootloader too. The target part is BYK916 (SH68F90A); override the
+# port with SINODUDE_PORT.
+
+[tasks.flash-isp]
+description = "Write the RK61 Plus firmware over the sinodude-serial ICP programmer"
+depends = ["setup"]
+run = '''
+#!/usr/bin/env bash
+set -euo pipefail
+meson compile -C build royalkludge-rk61plus_default_smk.hex > /dev/null
+sinodude write --flash build/royalkludge-rk61plus_default_smk.hex \
+  -c sinodude-serial -p "${SINODUDE_PART:-sh68f90a}" --port "${SINODUDE_PORT:-/dev/ttyUSB0}"
+'''
+
+[tasks.full-image]
+description = "Build a full RK61 Plus flash image (SMK firmware + stock bootloader)"
+depends = ["setup"]
+run = '''
+#!/usr/bin/env bash
+set -euo pipefail
+meson compile -C build royalkludge-rk61plus_default_smk.hex > /dev/null
+python3 utils/make_full_image.py \
+  --firmware build/royalkludge-rk61plus_default_smk.hex \
+  --bootloader assets/keyboards/royalkludge-rk61plus/reference/rk61plus-stock-full.hex \
+  --output build/royalkludge-rk61plus_full.hex
+'''
+
+[tasks.flash-isp-full]
+description = "Write the full RK61 Plus image (firmware + bootloader) over the sinodude-serial ICP programmer"
+depends = ["full-image"]
+run = '''
+#!/usr/bin/env bash
+set -euo pipefail
+hex="${1:-build/royalkludge-rk61plus_full.hex}"
+shift || true
+sinodude write --flash "$hex" -c sinodude-serial -p "${SINODUDE_PART:-sh68f90a}" --port "${SINODUDE_PORT:-/dev/ttyUSB0}" "$@"
+'''
+
+# Reflash over the stock USB ISP bootloader (sinowisp), no Arduino needed. Only
+# works while the bootloader at 0xF000 is intact; use flash-isp-full to restore
+# it if a plain sinodude write zeroed it.
+[tasks.flash-usb]
+description = "Write the RK61 Plus firmware over the USB ISP bootloader (sinowisp)"
+depends = ["setup"]
+run = '''
+#!/usr/bin/env bash
+set -euo pipefail
+meson compile -C build royalkludge-rk61plus_default_smk.hex > /dev/null
+sinowisp write --platform sh68f90 --vendor_id 0x258a --product_id 0x00f8 --force \
+  build/royalkludge-rk61plus_default_smk.hex
+'''
