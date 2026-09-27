@@ -300,16 +300,18 @@ index at XRAM `0x086c`; SMK uses the `led_effect_t` enum instead.
 | 9 | `FX_TWINKLE` | pseudo-random per-key flicker |
 | 10 | `FX_SOLID_REACTIVE` | static base; a pressed key flashes white and fades |
 | 11 | `FX_SPLASH` | pressed keys (and neighbours) light up and fade |
+| 12 | `FX_RIPPLE` | a wave spreads out from the last pressed key |
 | — | off | |
 
 The effects are pure functions of `(row, col, phase, brightness, color)`, so
-none need per-key state (important on the RAM-tight 8051). The two reactive
-effects additionally read a per-key `reactive[][]` intensity that
-`matrix.c` latches on a key press (`led_effect_reactive_press`) and the LED
-frame decays (`led_effect_reactive_tick`); the other effects ignore it. The
-colour palette (10 slots, `Fn`+`.`) uses the QMK standard RGB values, with white
-as slot 0. Vial's lighting tab can set brightness, effect, speed and colour
-through the `VIA_CHANNEL_RGB_MATRIX` custom values (`src/smk/vial.c`).
+none need per-key state (important on the RAM-tight 8051). The three reactive
+effects additionally read per-key state that `matrix.c` latches on a key press
+(`led_effect_reactive_press`): a `reactive[][]` intensity for solid-reactive and
+splash, and the ripple source (key + press phase) for the wave. The LED frame
+ages both via `led_effect_reactive_tick(phase)`; the other effects ignore it.
+The colour palette (10 slots, `Fn`+`.`) uses the QMK standard RGB values, with
+white as slot 0. Vial's lighting tab can set brightness, effect, speed and
+colour through the `VIA_CHANNEL_RGB_MATRIX` custom values (`src/smk/vial.c`).
 
 Backlight and function controls follow the RK61 Plus manual:
 

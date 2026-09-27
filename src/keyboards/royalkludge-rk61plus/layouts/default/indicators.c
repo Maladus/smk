@@ -214,7 +214,7 @@ bool indicators_update_step(keyboard_state_t *keyboard, uint8_t current_step)
         led_phase_acc = (uint16_t)((led_phase_acc + user_settings.led_speed) & ((1u << (8u + LED_PHASE_SHIFT)) - 1u));
         led_phase     = (uint8_t)(led_phase_acc >> LED_PHASE_SHIFT);
         status_pulse_counter++;
-        led_effect_reactive_tick(); // decay the key-press effect intensities
+        led_effect_reactive_tick(led_phase); // decay key-press intensities + age the ripple
         render_dirty = true;        // animation and/or Fn indicator advanced
     }
 

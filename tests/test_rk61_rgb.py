@@ -55,7 +55,8 @@ FX_GRADIENT = 8
 FX_TWINKLE = 9
 FX_SOLID_REACTIVE = 10
 FX_SPLASH = 11
-FX_OFF = 12  # == FX_COUNT, end of the cycle
+FX_RIPPLE = 12
+FX_OFF = 13  # == FX_COUNT, end of the cycle
 
 # Colour palette slots (src/smk/led_effect.c): slot 0 is white, slot 1 red.
 PAL_WHITE = 0
@@ -268,6 +269,31 @@ class TestReactiveEffects(unittest.TestCase):
                 sim.kb.call(sim.kb._a("led_effect_reactive_tick"))
             self.assertEqual(sim.kb.get_xram(base + 0, 1)[0], 0,
                              "the intensity decays to zero")
+        finally:
+            sim.close()
+
+    def test_ripple_spreads_from_the_pressed_key(self):
+        sim = RgbSim()
+        try:
+            sim.set_settings(FX_RIPPLE, brightness=255, color=PAL_RED)
+            # Start a wave at key (2, 7) at phase 0.
+            sim.kb.set_xram(sim.kb._static("led_effect", "ripple_row"), [2])
+            sim.kb.set_xram(sim.kb._static("led_effect", "ripple_col"), [7])
+            sim.kb.set_xram(sim.kb._static("led_effect", "ripple_phase"), [0])
+            sim.kb.set_xram(sim.kb._static("led_effect", "ripple_active"), [1])
+
+            sim.kb.set_xram(sim.kb._static("indicators", "led_phase"), [0])
+            sim.render()
+            self.assertEqual(sim.fb_rgb(2, 7), [254, 0, 0],
+                             "the source key is lit at the wave front")
+            self.assertEqual(sim.fb_rgb(2, 0), [0, 0, 0],
+                             "a far key is still dark (wave not there yet)")
+
+            # Age the wave so the front reaches the far column.
+            sim.kb.set_xram(sim.kb._static("indicators", "led_phase"), [20])
+            sim.render()
+            self.assertGreater(sim.fb_rgb(2, 0)[0], 0,
+                               "the far key lights as the wave front passes")
         finally:
             sim.close()
 
@@ -486,7 +512,7 @@ class TestEffectControls(unittest.TestCase):
     def test_next_effect_cycles_and_wraps(self):
         sim = RgbSim()
         try:
-            sim.kb.set_xram(sim.kb._a("user_settings"), [FX_SPLASH, 255, 4])
+            sim.kb.set_xram(sim.kb._a("user_settings"), [FX_RIPPLE, 255, 4])
             sim.kb.call(sim.kb._a("indicators_next_effect"))
             self.assertEqual(self._settings(sim)[0], FX_OFF)
             sim.kb.call(sim.kb._a("indicators_next_effect"))
