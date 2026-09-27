@@ -19,6 +19,7 @@
     { "name": "BT1", "title": "Bluetooth 1", "shortName": "BT1" },
     { "name": "BT2", "title": "Bluetooth 2", "shortName": "BT2" },
     { "name": "BT3", "title": "Bluetooth 3", "shortName": "BT3" },
+    { "name": "BLE Reset", "title": "BLE Reset + Re-pair", "shortName": "RST" },
     { "name": "FX Prev", "title": "Effect Previous", "shortName": "FXP" },
     { "name": "FX Next", "title": "Effect Next", "shortName": "FXN" },
     { "name": "Speed Down", "title": "Speed Down", "shortName": "SPD-" },

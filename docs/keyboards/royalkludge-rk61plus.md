@@ -74,20 +74,30 @@ the BK3632 status reply, and USB is the fallback while no RF link is actually
 connected. Pressing a BT channel key re-enables RF. On the direct 2.4G band the
 `Fn`+`Q`/`W`/`E` BLE keys are disabled.
 
+`Fn`+`Space` (`LNK_RST`) is the full BLE recovery. It factory-resets the stored
+bonds (the heavy `rf_cmd_03(2)` wipe plus a sleep/wake/re-init cycle, matching
+the stock's "Reset Keyboard" combo) and then re-pairs the current BT channel.
+This recovers a BK3632 that has accumulated bad BLE state across repeated failed
+pairings — the rotating-MAC advertising / SMP-timeout case that the light
+`rf_wipe_bonds()` (param 3) cannot clear on its own.
+
 The re-pairing sequence mirrors the stock. The stock pairing path (`0xAA14`)
-builds `rf_set_link_mode(link, 1)` (`AA 03 01 01 <mode>`) and transmits it once,
-fire-and-forget; the periodic link supervisor reads the status and re-asserts
-the link once it reports paired. The stock's bond wipe is `rf_cmd_03(3)`
-(`AA 03 03 03 00`), not param 2 - SMK wipes with the same value before pairing,
-because the old bond otherwise re-adopts the previous host. The `Fn`+`Q`/`W`/`E`
-hold threshold matches the stock pairing counter (150 ticks, ~1.5 s).
+builds the link frame through a per-mode dispatcher (`0x9FFE`): 2.4G and BT2/BT3
+use command `0x01`, but **BT1 uses command `0x06`** (`AA 03 06 01 00`), and the
+channel is encoded as `0/1/2/3` in one payload byte with a separate pairing
+flag. SMK's `rf_set_link_mode()` reproduces this table. The stock's bond wipe is
+`rf_cmd_03(3)` (`AA 03 03 03 00`), not param 2 - SMK wipes with the same value
+before pairing, because the old bond otherwise re-adopts the previous host. The
+`Fn`+`Q`/`W`/`E` hold threshold matches the stock pairing counter (150 ticks,
+~1.5 s).
 
 The `Fn`+`Q`/`W`/`E` indicator shows the active channel: solid blue when the
-link is connected, slow blink when the channel is selected but no link is up
-(paired and searching, or unbound), and fast blink for the whole pairing
+link is paired (bound, whether or not a host is currently connected), slow blink
+when the channel is selected but unbound, and fast blink for the whole pairing
 exchange. The fast blink clears once the new bond is established (`paired`), or
 when the user switches channel or drops back to USB. In USB mode the RF link is
-disabled and the channel key stays dark.
+disabled and the channel key stays dark. 2.4G has no channel indicator key, so
+no overlay is drawn for it.
 
 The two blink states (pairing, and a selected channel with no link) overlay the
 effect without Fn held, so a pairing or reconnect sequence stays visible until

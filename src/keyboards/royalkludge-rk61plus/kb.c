@@ -197,6 +197,26 @@ bool kb_process_record(uint16_t keycode, bool key_pressed)
 
 #ifdef RF_ENABLED
     switch (keycode) {
+        case LNK_RST:
+            // Full BLE recovery (stock Fn+Space): factory-reset the stored
+            // bonds (heavy param-2 wipe + sleep/wake/re-init) and re-pair the
+            // current BT channel. Recovers the BK3632 from the rotating-MAC /
+            // SMP-timeout state a light rf_wipe_bonds() cannot clear.
+            if (key_pressed) {
+                rf_mode_t link = (rf_mode_t)user_settings.rf_link;
+                if (link == RF_MODE_2_4G || link > RF_MODE_BT3) {
+                    link = RF_MODE_BT1;
+                }
+                dprintf("rf reset + pairing %02x\r\n", link);
+                keyboard_state.paired    = 0;
+                keyboard_state.connected = 0;
+                pairing_active           = true;
+                conn_mode                = KEYBOARD_CONN_MODE_RF;
+                rf_factory_reset_bonds();
+                rf_set_link_pairing(link);
+            }
+            return false;
+
         case LNK_BT1:
         case LNK_BT2:
         case LNK_BT3:

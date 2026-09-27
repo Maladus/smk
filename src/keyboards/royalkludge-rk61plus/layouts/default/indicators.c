@@ -1,5 +1,6 @@
 #include "indicators.h"
 #include "kbdef.h"
+#include "matrix.h"
 #include "gpio.h"
 #include "pwm.h"
 #include "settings.h"
@@ -74,8 +75,9 @@ static uint8_t status_pulse_counter;
 
 static volatile bool render_dirty;
 
-// Fn held == the momentary layer is active (Fn is the board's only MO key).
-extern uint8_t action_layer;
+// Fn held == the momentary layer is active. Works in both builds via
+// matrix_fn_held() (Vial uses the layer_state engine, non-Vial the action_layer
+// shortcut).
 // Pairing-active flag owned by kb.c; the RF phase drives it while a long-press
 // pairing sequence runs.
 extern bool kb_pairing_active(void);
@@ -257,6 +259,15 @@ static uint8_t fn_active_col(void)
     }
 }
 
+// True when the active RF link maps to a BLE channel that has a Q/W/E
+// indicator key. 2.4G has no channel key, so the channel overlay is never
+// drawn for it (fn_active_col() would otherwise return a column that never
+// matches, leaving the blink logic running with no visible key).
+static bool fn_has_channel_key(void)
+{
+    return keyboard_state.rf_link == FN_RF_BT1 || keyboard_state.rf_link == FN_RF_BT2 || keyboard_state.rf_link == FN_RF_BT3;
+}
+
 static uint8_t fn_channel_blue(void)
 {
     if (!kb_rf_mode_active()) {
@@ -264,15 +275,16 @@ static uint8_t fn_channel_blue(void)
         return 0;
     }
     if (kb_pairing_active()) {
-        // Pairing in progress (long-press Fn+Q/W/E): fast blink.
+        // Pairing in progress (long-press Fn+Q/W/E or Fn+Space reset): fast blink.
         return (status_pulse_counter & FN_BLINK_FAST) ? 255 : 0;
     }
-    if (keyboard_state.connected) {
-        // Link up: solid blue.
+    if (keyboard_state.paired) {
+        // Bound (paired), whether or not a host is currently connected: solid
+        // blue. A paired-but-not-connected channel was falling through to the
+        // slow "no link" blink, which read as a failed pairing.
         return 255;
     }
-    // Selected but no link yet (paired or not): slow blink while it connects.
-    // Fast blink is reserved for an active pairing sequence.
+    // Selected but unbound: slow blink while it waits to be paired.
     return (status_pulse_counter & FN_BLINK_SLOW) ? 255 : 0;
 }
 
@@ -282,7 +294,10 @@ static uint8_t fn_channel_blue(void)
 // connected state stays Fn-only so it does not permanently override the effect.
 static bool fn_channel_overlay_visible(void)
 {
-    if (action_layer != 0) {
+    if (!fn_has_channel_key()) {
+        return false; // 2.4G: no Q/W/E indicator key to overlay
+    }
+    if (matrix_fn_held()) {
         return true;
     }
     if (!kb_rf_mode_active()) {
@@ -317,7 +332,7 @@ static void led_regen_one(void)
 
     // Fn held: light N white while NKRO is on, the same way the BT channel keys
     // show the active link.
-    if (action_layer != 0 && keymap_config.nkro && regen_row == NKRO_ROW && regen_col == NKRO_COL) {
+    if (matrix_fn_held() && keymap_config.nkro && regen_row == NKRO_ROW && regen_col == NKRO_COL) {
         r = 255;
         g = 255;
         b = 255;

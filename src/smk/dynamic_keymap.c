@@ -22,7 +22,7 @@
 
 #    define VIAL_KEYMAP_MAGIC0      0x56u // 'V'
 #    define VIAL_KEYMAP_MAGIC1      0x4Bu // 'K'
-#    define VIAL_KEYMAP_VERSION     1u
+#    define VIAL_KEYMAP_VERSION     2u
 #    define VIAL_KEYMAP_SECTOR_SIZE FLASH_CFG_SIZE
 #    define VIAL_KEYMAP_HEADER_SIZE 16u
 #    define VIAL_KEYMAP_PAYLOAD     ((uint16_t)VIAL_LAYERS * VIAL_NUM_KEYS * 2u)

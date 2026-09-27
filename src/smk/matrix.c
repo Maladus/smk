@@ -120,6 +120,15 @@ void set_default_layer(uint8_t layer)
     default_layer = layer;
 }
 
+bool matrix_fn_held(void)
+{
+#ifdef VIAL_ENABLE
+    return (layer_state & (uint16_t)(1u << LAYER_FN)) != 0;
+#else
+    return action_layer == LAYER_FN;
+#endif
+}
+
 static uint16_t resolve_keycode(uint16_t base, uint8_t row, uint8_t col)
 {
     if (!action_layer) {

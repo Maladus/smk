@@ -22,6 +22,8 @@ static const __code char rf_bt3_name[] = "SMK BT3.0";
 
 uint8_t rf_tx_buf[32];
 
+static uint8_t commanded_link = RF_MODE_2_4G;
+
 static uint8_t kro_prev_active;
 static uint8_t blanking_pending;
 static bool    blanking_active;
@@ -207,7 +209,6 @@ bool rf_update_keyboard_state(keyboard_state_t *keyboard)
 #define RF_SUPERVISOR_TICK_INTERVAL 500u
 #define RF_PAIRING_WINDOW_POLLS     600u
 
-static uint8_t  commanded_link       = RF_MODE_2_4G;
 static uint16_t pairing_window_polls = 0;
 
 static uint16_t supervisor_ticks      = RF_SUPERVISOR_TICK_INTERVAL;
@@ -238,17 +239,44 @@ void rf_link_supervisor(keyboard_state_t *keyboard)
         return;
     }
 
-    if ((!keyboard->connected && !keyboard->paired) || (keyboard->rf_link != commanded_link)) {
-        rf_set_link_mode(commanded_link, 0);
+    if (keyboard->connected) {
+        // Already connected: leave the link alone (no advertising, no re-assert).
+        return;
     }
+
+    if (keyboard->rf_link != commanded_link) {
+        // A channel switch is pending; re-assert the commanded link.
+        rf_set_link_mode(commanded_link, (commanded_link == RF_MODE_2_4G) ? 0u : 1u);
+        return;
+    }
+
+    if (keyboard->paired) {
+        // Bound but currently disconnected: advertise connectable (pairing=0)
+        // so the paired host can find and reconnect to us, without opening a
+        // fresh pairing window for strangers.
+        rf_set_link_mode(commanded_link, 0);
+        return;
+    }
+
+    // Unbound BT channel: advertise pairable (pairing=1) so a new host can pair.
+    // 2.4G has no pairing concept and uses a plain link.
+    rf_set_link_mode(commanded_link, (commanded_link == RF_MODE_2_4G) ? 0u : 1u);
 }
 
 void rf_set_link(rf_mode_t link)
 {
     commanded_link = (uint8_t)link;
-    rf_set_link_mode(link, 0);
+
+    // Selecting a BT channel must advertise (be discoverable), not just
+    // re-assert the link. The stock channel-select path (0xAA14) always puts a
+    // BT channel into advertising mode; a plain pairing=0 re-assert leaves the
+    // radio silently un-discoverable, which is why the board only showed up on
+    // the host after a Fn+Space reset (pairing=1). 2.4G uses a plain link.
+    const uint8_t pairing = (link == RF_MODE_2_4G) ? 0u : 1u;
+
+    rf_set_link_mode(link, pairing);
     delay_ms(20);
-    rf_set_link_mode(link, 0);
+    rf_set_link_mode(link, pairing);
 }
 
 void rf_apply_usb_mode(void)
@@ -344,6 +372,10 @@ static bool rf_send_or_retry(uint8_t *buf, int len)
     return false;
 }
 
+// Build the link/set-mode frame. The BK3632 accepts a plain
+// `AA 03 01 <pairing> <mode>`; the `pairing` byte selects a plain link
+// re-assert (0) vs. an active pairing exchange (1). The channel/mode byte is
+// the raw rf_mode_t value.
 void rf_set_link_mode(uint8_t mode, uint8_t pairing)
 {
     const uint8_t len = 6;

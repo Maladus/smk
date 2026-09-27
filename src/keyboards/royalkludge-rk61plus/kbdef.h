@@ -167,10 +167,13 @@
 #define LED_SINK_R4B PWM02
 
 // Custom keycodes. Fn layer Q/W/E select the BT channel (LNK_BT1/2/3).
+// LNK_RST recovers the radio from bad BLE state (factory-resets stored bonds
+// and re-pairs the current BT channel); stock maps this to Fn+Space.
 enum custom_keycodes {
     LNK_BT1 = KB_KEYCODE_BASE,
     LNK_BT2,
     LNK_BT3,
+    LNK_RST, // full BLE reset + re-pair
 
     FX_PREV, // previous RGB effect
     FX_NEXT, // next RGB effect

@@ -12,6 +12,11 @@ bool matrix_recovery_held(void);
 
 void matrix_scan_full();
 
+// True while the Fn momentary layer is held, regardless of build (Vial uses the
+// layer_state engine, non-Vial the action_layer shortcut). The indicator uses
+// this to decide whether to overlay the channel key and N key.
+bool matrix_fn_held(void);
+
 #ifdef VIAL_ENABLE
 // Raw switch state for the Vial matrix tester: true when the key at (row, col)
 // is held. Reads the scan-written matrix[col] bitmap.

@@ -65,9 +65,10 @@ const uint16_t keymaps[][MATRIX_ROWS][MATRIX_COLS] = {
      * |------------------------------------------------------------|
      * |        |   |   |   |   |   |   |   |   |Ins|Del|           |
      * |------------------------------------------------------------|
-     * |    |    |    |                         |    |    |    |    |
+     * |    |    |    |        LNK_RST (BLE reset)   |    |    |    |    |
      * `------------------------------------------------------------'
      * BT1/BT2/BT3 = Bluetooth channel select (hold 3-5 s to pair).
+     * LNK_RST (Fn+Space) = full BLE reset + re-pair (stock "Reset Keyboard").
      * Backlight: Fn+\ cycles the effect, Fn+[ / ] brightness, Fn+; / ' speed,
      * Fn+. cycles the predefined colours (the '<'/'>' key).
      * Special: Y PrtSc, U ScrLK, I Pause, H Insert, J Home, K PgUp,
@@ -81,7 +82,7 @@ const uint16_t keymaps[][MATRIX_ROWS][MATRIX_COLS] = {
         _______, LNK_BT1, LNK_BT2, LNK_BT3, _______, _______, KC_PSCR, KC_SCRL, KC_PAUS, _______, _______, BRI_DN,  BRI_UP,  FX_NEXT,
         _______, _______, _______, _______, _______, _______, KC_INS,  KC_HOME, KC_PGUP, _______, SPD_DN,  SPD_UP,           _______,
         _______, _______, _______, _______, _______, QK_BOOTLOADER, KC_DEL, KC_END, KC_PGDN, CLR_FWD, KC_UP,        _______,
-        _______, _______, _______,                            _______,                   KC_LEFT, KC_DOWN, KC_RGHT, _______
+        _______, _______, _______,                            LNK_RST,                   KC_LEFT, KC_DOWN, KC_RGHT, _______
     ),
 
 #ifdef VIAL_ENABLE

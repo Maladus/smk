@@ -116,6 +116,16 @@ meson compile -C build \
 meson test -C build --suite sim --print-errorlogs
 '''
 
+# Print the board's HID debug console (dprintf logs). Pass an alternate VID:PID
+# as the first argument, e.g. `mise run log -- 05ac:024f`.
+[tasks.log]
+description = "Read the board's HID debug console (smk-console)"
+run = '''
+#!/usr/bin/env bash
+set -euo pipefail
+cargo run --release --manifest-path tools/smk-console/Cargo.toml -- "${@:-258a:00f8}"
+'''
+
 # ICP flashing over the sinodude-serial Arduino programmer. Needs `sinodude` on
 # PATH. Unlike sinowisp (which writes the firmware region only), this writes the
 # code flash exactly as the given Intel HEX describes, so it can restore or
