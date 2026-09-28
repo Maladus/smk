@@ -41,14 +41,23 @@
 #    define KM_SEQ      9u
 #    define KM_CKSUM_LO 10u
 #    define KM_CKSUM_HI 11u
+#    define KM_FLOW_LO  12u
+#    define KM_FLOW_HI  13u
+#    define KM_QUICK_LO 14u
+#    define KM_QUICK_HI 15u
 #    define KM_PAYLOAD  VIAL_KEYMAP_HEADER_SIZE
 
 #    define KM_FLAG_PERMISSIVE_HOLD 0x01u
 #    define KM_FLAG_HOLD_ON_OTHER   0x02u
+#    define KM_FLAG_RETRO_TAPPING   0x04u
 
-#    define KM_TAPPING_TERM_DEFAULT 200u
-#    define KM_TAPPING_TERM_MAX     10000u
-#    define KM_HOLD_FLAGS_DEFAULT   KM_FLAG_PERMISSIVE_HOLD
+#    define KM_TAPPING_TERM_DEFAULT   200u
+#    define KM_TAPPING_TERM_MAX       10000u
+#    define KM_FLOW_TAP_TERM_DEFAULT  0u // off until the host sets it
+#    define KM_FLOW_TAP_TERM_MAX      1000u
+#    define KM_QUICK_TAP_TERM_DEFAULT 0u // off; QMK defaults this to the tapping term
+#    define KM_QUICK_TAP_TERM_MAX     10000u
+#    define KM_HOLD_FLAGS_DEFAULT     KM_FLAG_PERMISSIVE_HOLD
 
 _Static_assert(VIAL_LAYERS >= 1 && VIAL_LAYERS <= 16, "vial layer count must be 1..16");
 
@@ -63,6 +72,8 @@ static __xdata uint8_t keymap_sector[VIAL_KEYMAP_TOTAL];
 static uint8_t  active_sector;
 static bool     store_ready;
 static uint16_t tapping_term;
+static uint16_t flow_tap_term;
+static uint16_t quick_tap_term;
 static uint8_t  hold_flags;
 
 // Copy 0/1 base; each copy spans VIAL_KEYMAP_SPAN sectors.
@@ -171,9 +182,13 @@ static void store_write_settings(void)
         return;
     }
     store_begin();
-    keymap_sector[KM_TERM_LO] = (uint8_t)(tapping_term & 0xFF);
-    keymap_sector[KM_TERM_HI] = (uint8_t)(tapping_term >> 8);
-    keymap_sector[KM_FLAGS]   = hold_flags;
+    keymap_sector[KM_TERM_LO]  = (uint8_t)(tapping_term & 0xFF);
+    keymap_sector[KM_TERM_HI]  = (uint8_t)(tapping_term >> 8);
+    keymap_sector[KM_FLOW_LO]  = (uint8_t)(flow_tap_term & 0xFF);
+    keymap_sector[KM_FLOW_HI]  = (uint8_t)(flow_tap_term >> 8);
+    keymap_sector[KM_QUICK_LO] = (uint8_t)(quick_tap_term & 0xFF);
+    keymap_sector[KM_QUICK_HI] = (uint8_t)(quick_tap_term >> 8);
+    keymap_sector[KM_FLAGS]    = hold_flags;
     store_commit();
 }
 
@@ -183,16 +198,20 @@ static void seed_defaults(void)
         keymap_sector[i] = 0;
     }
 
-    keymap_sector[KM_MAGIC0]  = VIAL_KEYMAP_MAGIC0;
-    keymap_sector[KM_MAGIC1]  = VIAL_KEYMAP_MAGIC1;
-    keymap_sector[KM_VERSION] = VIAL_KEYMAP_VERSION;
-    keymap_sector[KM_LAYERS]  = VIAL_LAYERS;
-    keymap_sector[KM_HASH]    = vial_key_table_hash();
-    keymap_sector[KM_BASE]    = 0;
-    keymap_sector[KM_TERM_LO] = (uint8_t)(KM_TAPPING_TERM_DEFAULT & 0xFF);
-    keymap_sector[KM_TERM_HI] = (uint8_t)(KM_TAPPING_TERM_DEFAULT >> 8);
-    keymap_sector[KM_FLAGS]   = KM_HOLD_FLAGS_DEFAULT;
-    keymap_sector[KM_SEQ]     = 0;
+    keymap_sector[KM_MAGIC0]   = VIAL_KEYMAP_MAGIC0;
+    keymap_sector[KM_MAGIC1]   = VIAL_KEYMAP_MAGIC1;
+    keymap_sector[KM_VERSION]  = VIAL_KEYMAP_VERSION;
+    keymap_sector[KM_LAYERS]   = VIAL_LAYERS;
+    keymap_sector[KM_HASH]     = vial_key_table_hash();
+    keymap_sector[KM_BASE]     = 0;
+    keymap_sector[KM_TERM_LO]  = (uint8_t)(KM_TAPPING_TERM_DEFAULT & 0xFF);
+    keymap_sector[KM_TERM_HI]  = (uint8_t)(KM_TAPPING_TERM_DEFAULT >> 8);
+    keymap_sector[KM_FLOW_LO]  = (uint8_t)(KM_FLOW_TAP_TERM_DEFAULT & 0xFF);
+    keymap_sector[KM_FLOW_HI]  = (uint8_t)(KM_FLOW_TAP_TERM_DEFAULT >> 8);
+    keymap_sector[KM_QUICK_LO] = (uint8_t)(KM_QUICK_TAP_TERM_DEFAULT & 0xFF);
+    keymap_sector[KM_QUICK_HI] = (uint8_t)(KM_QUICK_TAP_TERM_DEFAULT >> 8);
+    keymap_sector[KM_FLAGS]    = KM_HOLD_FLAGS_DEFAULT;
+    keymap_sector[KM_SEQ]      = 0;
 
     for (uint8_t layer = 0; layer < VIAL_LAYERS; layer++) {
         for (uint8_t pos = 0; pos < MATRIX_ROWS * MATRIX_COLS; pos++) {
@@ -209,9 +228,11 @@ static void seed_defaults(void)
         }
     }
 
-    tapping_term  = KM_TAPPING_TERM_DEFAULT;
-    hold_flags    = KM_HOLD_FLAGS_DEFAULT;
-    active_sector = 1; // store_commit() writes the spare, so sector 0
+    tapping_term   = KM_TAPPING_TERM_DEFAULT;
+    flow_tap_term  = KM_FLOW_TAP_TERM_DEFAULT;
+    quick_tap_term = KM_QUICK_TAP_TERM_DEFAULT;
+    hold_flags     = KM_HOLD_FLAGS_DEFAULT;
+    active_sector  = 1; // store_commit() writes the spare, so sector 0
     store_commit();
     set_default_layer(0);
     store_ready = true;
@@ -817,9 +838,11 @@ void dynamic_keymap_init(void)
         store_begin();
         const uint8_t base = keymap_sector[KM_BASE];
         set_default_layer(base < VIAL_LAYERS ? base : 0);
-        tapping_term = (uint16_t)(keymap_sector[KM_TERM_LO] | ((uint16_t)keymap_sector[KM_TERM_HI] << 8));
-        hold_flags   = keymap_sector[KM_FLAGS];
-        store_ready  = true;
+        tapping_term   = (uint16_t)(keymap_sector[KM_TERM_LO] | ((uint16_t)keymap_sector[KM_TERM_HI] << 8));
+        flow_tap_term  = (uint16_t)(keymap_sector[KM_FLOW_LO] | ((uint16_t)keymap_sector[KM_FLOW_HI] << 8));
+        quick_tap_term = (uint16_t)(keymap_sector[KM_QUICK_LO] | ((uint16_t)keymap_sector[KM_QUICK_HI] << 8));
+        hold_flags     = keymap_sector[KM_FLAGS];
+        store_ready    = true;
     }
 
     dynamic_entry_init();
@@ -930,6 +953,40 @@ void dynamic_keymap_set_tapping_term(uint16_t term)
     store_write_settings();
 }
 
+uint16_t dynamic_keymap_flow_tap_term(void)
+{
+    return flow_tap_term;
+}
+
+void dynamic_keymap_set_flow_tap_term(uint16_t term)
+{
+    if (term > KM_FLOW_TAP_TERM_MAX) {
+        term = KM_FLOW_TAP_TERM_MAX;
+    }
+    if (term == flow_tap_term) {
+        return;
+    }
+    flow_tap_term = term;
+    store_write_settings();
+}
+
+uint16_t dynamic_keymap_quick_tap_term(void)
+{
+    return quick_tap_term;
+}
+
+void dynamic_keymap_set_quick_tap_term(uint16_t term)
+{
+    if (term > KM_QUICK_TAP_TERM_MAX) {
+        term = KM_QUICK_TAP_TERM_MAX;
+    }
+    if (term == quick_tap_term) {
+        return;
+    }
+    quick_tap_term = term;
+    store_write_settings();
+}
+
 bool dynamic_keymap_permissive_hold(void)
 {
     return (hold_flags & KM_FLAG_PERMISSIVE_HOLD) != 0;
@@ -960,10 +1017,27 @@ void dynamic_keymap_set_hold_on_other_key_press(bool on)
     store_write_settings();
 }
 
+bool dynamic_keymap_retro_tapping(void)
+{
+    return (hold_flags & KM_FLAG_RETRO_TAPPING) != 0;
+}
+
+void dynamic_keymap_set_retro_tapping(bool on)
+{
+    const uint8_t flags = on ? (uint8_t)(hold_flags | KM_FLAG_RETRO_TAPPING) : (uint8_t)(hold_flags & ~KM_FLAG_RETRO_TAPPING);
+    if (flags == hold_flags) {
+        return;
+    }
+    hold_flags = flags;
+    store_write_settings();
+}
+
 void dynamic_keymap_reset_settings(void)
 {
-    tapping_term = KM_TAPPING_TERM_DEFAULT;
-    hold_flags   = KM_HOLD_FLAGS_DEFAULT;
+    tapping_term   = KM_TAPPING_TERM_DEFAULT;
+    flow_tap_term  = KM_FLOW_TAP_TERM_DEFAULT;
+    quick_tap_term = KM_QUICK_TAP_TERM_DEFAULT;
+    hold_flags     = KM_HOLD_FLAGS_DEFAULT;
     store_write_settings();
 }
 

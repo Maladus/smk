@@ -70,6 +70,7 @@ MATRIX_COLS = 14
 KC_A = 0x0004
 KC_B = 0x0005
 KC_C = 0x0006
+KC_E = 0x0008
 KC_J = 0x000D
 KC_K = 0x000E
 KC_L = 0x000F
@@ -712,8 +713,31 @@ class TestVialProtocol(unittest.TestCase):
 
     def test_qmk_settings_query(self):
         out = self.kb.vial([0xFE, 0x09])
-        qsids = [out[0] | (out[1] << 8), out[2] | (out[3] << 8), out[4] | (out[5] << 8)]
-        self.assertEqual(qsids, [7, 22, 23])
+        qsids = [out[i] | (out[i + 1] << 8) for i in range(0, 12, 2)]
+        self.assertEqual(qsids, [7, 22, 23, 24, 25, 27])
+        self.assertEqual(out[12] | (out[13] << 8), 0xFFFF, "the list is 0xFFFF-terminated")
+
+    def test_retro_and_quick_tap_settings_roundtrip(self):
+        self.assertEqual(self.kb.vial([0xFE, 0x0A, 24, 0x00])[1], 0, "retro tapping is off by default")
+        out = self.kb.vial([0xFE, 0x0A, 25, 0x00])
+        self.assertEqual(out[1] | (out[2] << 8), 0, "quick tap is off by default")
+        self.kb.vial([0xFE, 0x0B, 24, 0x00, 0x01])
+        self.kb.vial([0xFE, 0x0B, 25, 0x00, 0xAF, 0x00])  # 175
+        self.assertEqual(self.kb.vial([0xFE, 0x0A, 24, 0x00])[1], 1)
+        out = self.kb.vial([0xFE, 0x0A, 25, 0x00])
+        self.assertEqual(out[1] | (out[2] << 8), 175)
+        self.kb.vial([0xFE, 0x0C])  # reset
+        self.assertEqual(self.kb.vial([0xFE, 0x0A, 24, 0x00])[1], 0, "reset turns retro tapping off")
+        out = self.kb.vial([0xFE, 0x0A, 25, 0x00])
+        self.assertEqual(out[1] | (out[2] << 8), 0, "reset turns quick tap off")
+
+    def test_flow_tap_term_setting_roundtrip(self):
+        self.assertEqual(self.kb.vial([0xFE, 0x0A, 27, 0x00])[1], 0, "flow tap is off by default")
+        self.kb.vial([0xFE, 0x0B, 27, 0x00, 0x78, 0x00])  # 120
+        out = self.kb.vial([0xFE, 0x0A, 27, 0x00])
+        self.assertEqual(out[1] | (out[2] << 8), 120)
+        self.kb.vial([0xFE, 0x0C])  # reset
+        self.assertEqual(self.kb.vial([0xFE, 0x0A, 27, 0x00])[1], 0, "reset turns flow tap off again")
 
     def test_qmk_settings_get_set(self):
         out = self.kb.vial([0xFE, 0x0A, 0x07, 0x00])
@@ -1042,7 +1066,7 @@ class TestVialTapHold(unittest.TestCase):
         self.kb.key_event(SPC_ROW, SPC_COL, False)
         reports = self.kb.ep1_reports()
         self.assertTrue(any(KC_SPC in r for r in reports), "tap keycode must be sent")
-        self.assertTrue(any(KC_A in r for r in reports), "buffered press must be replayed")
+        self.assertTrue(any(KC_A in r[3:] for r in reports), "buffered press must be replayed")
         self.kb.key_event(0, 1, False)
 
     def test_tapping_term_change_affects_decision(self):
@@ -1096,7 +1120,7 @@ class TestVialModTap(unittest.TestCase):
         self.kb.set_tick(10)
         self.kb.key_event(SPC_ROW, SPC_COL, False)
         reports = self.kb.ep1_reports()
-        self.assertTrue(any(KC_A in r for r in reports), f"tap must send A; {reports}")
+        self.assertTrue(any(KC_A in r[3:] for r in reports), f"tap must send A; {reports}")
         self.assertEqual(self.kb.report()[0], 0, "a tap must not leave the modifier")
 
     def test_right_shift_hold(self):
@@ -1193,6 +1217,177 @@ class TestVialModTap(unittest.TestCase):
         self.kb.key_event(0, 1, False)
         self.assertEqual(self.kb.report()[0], 0, "Shift clears with its own release")
 
+    # --- flow tap ---------------------------------------------------------
+
+    def test_flow_tap_resolves_as_tap_when_typing_fast(self):
+        """With a flow tap term set, a mod-tap that follows a typed key inside the
+        window is a tap on press: the letter goes out at once and the modifier
+        never applies, however long the key is held."""
+        self.kb.vial([0xFE, 0x0B, 27, 0x00, 0x78, 0x00])  # flow tap term = 120
+        self.kb.set_keycode(0, 0, 1, KC_E)
+        self.kb.set_tick(0)
+        self.kb.key_event(0, 1, True)  # type a letter
+        self.kb.set_tick(5)
+        self.kb.key_event(0, 1, False)
+        self.kb.set_tick(50)
+        before = len(self.kb.ep1_reports())
+        self.kb.key_event(SPC_ROW, SPC_COL, True)  # MT(LSFT, A) straight after
+        reports = self.kb.ep1_reports()[before:]
+        self.assertTrue(any(KC_A in r[3:] for r in reports), f"the tap keycode goes out on press; {reports}")
+        self.kb.set_tick(600)
+        self.kb.tapping_task()
+        self.assertEqual(self.kb.report()[0], 0, "a flow tap never applies the modifier")
+        self.kb.key_event(SPC_ROW, SPC_COL, False)
+        self.assertEqual(self.kb.report()[0], 0, "and its release leaves nothing behind")
+
+    def test_flow_tap_off_by_default(self):
+        self.kb.set_keycode(0, 0, 1, KC_E)
+        self.kb.set_tick(0)
+        self.kb.key_event(0, 1, True)
+        self.kb.set_tick(5)
+        self.kb.key_event(0, 1, False)
+        self.kb.set_tick(50)
+        self.kb.key_event(SPC_ROW, SPC_COL, True)
+        self.kb.set_tick(600)
+        self.kb.tapping_task()
+        self.assertEqual(self.kb.report()[0], MOD_LSFT, "without a flow tap term the hold applies")
+        self.kb.key_event(SPC_ROW, SPC_COL, False)
+
+    def test_flow_tap_window_expires(self):
+        self.kb.vial([0xFE, 0x0B, 27, 0x00, 0x78, 0x00])
+        self.kb.set_keycode(0, 0, 1, KC_E)
+        self.kb.set_tick(0)
+        self.kb.key_event(0, 1, True)
+        self.kb.set_tick(5)
+        self.kb.key_event(0, 1, False)
+        self.kb.set_tick(300)  # past the 120 ms window
+        self.kb.key_event(SPC_ROW, SPC_COL, True)
+        self.kb.set_tick(900)
+        self.kb.tapping_task()
+        self.assertEqual(self.kb.report()[0], MOD_LSFT, "outside the window it is a hold")
+        self.kb.key_event(SPC_ROW, SPC_COL, False)
+
+    def test_flow_tap_slot_is_reusable(self):
+        """A key that flow-tapped must not poison the slot it used: the next
+        tap/hold key in that slot still holds normally."""
+        self.kb.vial([0xFE, 0x0B, 27, 0x00, 0x78, 0x00])
+        self.kb.set_keycode(0, 0, 1, KC_E)
+        self.kb.set_tick(0)
+        self.kb.key_event(0, 1, True)  # type a letter
+        self.kb.set_tick(5)
+        self.kb.key_event(0, 1, False)
+        self.kb.set_tick(50)
+        self.kb.key_event(SPC_ROW, SPC_COL, True)  # flow tap: takes slot 0
+        self.kb.set_tick(60)
+        self.kb.key_event(SPC_ROW, SPC_COL, False)  # and frees it again
+        self.kb.set_tick(900)  # well past the flow window
+        self.kb.key_event(SPC_ROW, SPC_COL, True)
+        self.kb.set_tick(1200)
+        self.kb.tapping_task()
+        self.assertEqual(self.kb.report()[0], MOD_LSFT, "the reused slot must still hold")
+        self.kb.key_event(SPC_ROW, SPC_COL, False)
+        self.assertEqual(self.kb.report()[0], 0)
+
+    def test_flow_tap_leaves_mod_chords_alone(self):
+        """Two mod-taps pressed together stay a chord (Ctrl+Alt) with a flow tap
+        term set, because the second press is replayed, not typed."""
+        self.kb.vial([0xFE, 0x0B, 27, 0x00, 0x78, 0x00])
+        self.kb.set_keycode(0, 0, 1, QK_MOD_TAP | (MOD_LALT << 8) | KC_E)
+        self.kb.set_tick(0)
+        self.kb.key_event(0, 1, True)  # Alt mod-tap
+        self.kb.set_tick(10)
+        self.kb.key_event(SPC_ROW, SPC_COL, True)  # Shift mod-tap, right after
+        self.kb.set_tick(600)
+        self.kb.tapping_task()  # Alt resolves, the Shift press is replayed and armed
+        self.kb.set_tick(900)
+        self.kb.tapping_task()  # Shift's term expires as well
+        self.assertEqual(self.kb.report()[0], MOD_LSFT | MOD_LALT, "both holds apply")
+        self.kb.key_event(SPC_ROW, SPC_COL, False)
+        self.kb.key_event(0, 1, False)
+        self.assertEqual(self.kb.report()[0], 0, "both releases clear")
+
+    # --- quick tap --------------------------------------------------------
+
+    def test_quick_tap_repeats_the_tap_key(self):
+        """Tap a mod-tap, then press it again inside the quick tap window: the
+        tap keycode repeats and no modifier applies, however long it is held."""
+        self.kb.vial([0xFE, 0x0B, 25, 0x00, 0xAF, 0x00])  # quick tap = 175
+        self.kb.set_tick(0)
+        self.kb.key_event(SPC_ROW, SPC_COL, True)
+        self.kb.set_tick(10)
+        self.kb.key_event(SPC_ROW, SPC_COL, False)  # tap: KC_A goes out
+        self.kb.set_tick(50)
+        before = len(self.kb.ep1_reports())
+        self.kb.key_event(SPC_ROW, SPC_COL, True)  # again inside the window
+        reports = self.kb.ep1_reports()[before:]
+        self.assertTrue(any(KC_A in r[3:] for r in reports), f"the tap keycode repeats; {reports}")
+        self.kb.set_tick(600)
+        self.kb.tapping_task()
+        self.assertEqual(self.kb.report()[0], 0, "a quick tap never applies the modifier")
+        self.assertTrue(KC_A in self.kb.report()[2:], "the keycode stays down for auto-repeat")
+        self.kb.key_event(SPC_ROW, SPC_COL, False)
+        self.assertEqual(self.kb.report()[0], 0)
+
+    def test_quick_tap_window_expires(self):
+        self.kb.vial([0xFE, 0x0B, 25, 0x00, 0xAF, 0x00])  # quick tap = 175
+        self.kb.set_tick(0)
+        self.kb.key_event(SPC_ROW, SPC_COL, True)
+        self.kb.set_tick(10)
+        self.kb.key_event(SPC_ROW, SPC_COL, False)
+        self.kb.set_tick(400)  # well past the window
+        self.kb.key_event(SPC_ROW, SPC_COL, True)
+        self.kb.set_tick(800)
+        self.kb.tapping_task()
+        self.assertEqual(self.kb.report()[0], MOD_LSFT, "outside the window the hold applies")
+        self.kb.key_event(SPC_ROW, SPC_COL, False)
+        self.assertEqual(self.kb.report()[0], 0)
+
+    def test_quick_tap_off_by_default(self):
+        self.kb.set_tick(0)
+        self.kb.key_event(SPC_ROW, SPC_COL, True)
+        self.kb.set_tick(10)
+        self.kb.key_event(SPC_ROW, SPC_COL, False)
+        self.kb.set_tick(50)
+        self.kb.key_event(SPC_ROW, SPC_COL, True)
+        self.kb.set_tick(600)
+        self.kb.tapping_task()
+        self.assertEqual(self.kb.report()[0], MOD_LSFT, "without a quick tap term the hold applies")
+        self.kb.key_event(SPC_ROW, SPC_COL, False)
+
+    # --- retro tapping ----------------------------------------------------
+
+    def test_retro_tapping_sends_the_tap_on_a_slow_release(self):
+        """Held past the term with nothing else pressed: the release taps instead
+        of leaving the hold as the answer."""
+        self.kb.vial([0xFE, 0x0B, 24, 0x00, 0x01])  # retro tapping on
+        self.kb.set_tick(0)
+        self.kb.key_event(SPC_ROW, SPC_COL, True)
+        self.kb.set_tick(300)
+        self.kb.tapping_task()
+        self.assertEqual(self.kb.report()[0], MOD_LSFT, "the modifier is live while held")
+        before = len(self.kb.ep1_reports())
+        self.kb.key_event(SPC_ROW, SPC_COL, False)
+        reports = self.kb.ep1_reports()[before:]
+        self.assertTrue(any(KC_A in r[3:] for r in reports), f"the release taps; {reports}")
+        self.assertEqual(self.kb.report()[0], 0, "and clears the modifier")
+
+    def test_retro_tapping_leaves_a_real_chord_alone(self):
+        """A key pressed while the tap/hold key is down makes it a hold, so the
+        release must not add a stray letter."""
+        self.kb.vial([0xFE, 0x0B, 24, 0x00, 0x01])
+        self.kb.set_keycode(0, 0, 1, KC_E)
+        self.kb.set_tick(0)
+        self.kb.key_event(SPC_ROW, SPC_COL, True)
+        self.kb.set_tick(300)
+        self.kb.tapping_task()
+        self.kb.key_event(0, 1, True)  # interrupt
+        self.kb.key_event(0, 1, False)
+        before = len(self.kb.ep1_reports())
+        self.kb.key_event(SPC_ROW, SPC_COL, False)
+        reports = self.kb.ep1_reports()[before:]
+        self.assertFalse(any(KC_A in r[3:] for r in reports), f"no retro tap after a chord; {reports}")
+        self.assertEqual(self.kb.report()[0], 0)
+
     def test_buffered_second_mod_tap_is_not_dropped(self):
         """Press a mod-tap, press a second one under the term, release the
         first: the buffered press must still resolve, so the second key taps its
@@ -1208,7 +1403,7 @@ class TestVialModTap(unittest.TestCase):
         self.kb.set_tick(30)
         self.kb.key_event(0, 1, False)  # under the term, so it is a tap
         reports = self.kb.ep1_reports()[before:]
-        self.assertTrue(any(KC_B in r for r in reports), f"the second mod-tap must tap B; {reports}")
+        self.assertTrue(any(KC_B in r[3:] for r in reports), f"the second mod-tap must tap B; {reports}")
         self.assertEqual(self.kb.report()[0], 0, "both taps leave no modifier")
 
 
@@ -1326,7 +1521,7 @@ class TestVialCombos(unittest.TestCase):
         self.kb.key_event(2, 1, True)     # A: not in the combo
         reports = self.kb.ep1_reports()
         self.assertTrue(any(KC_J in r for r in reports), "J must be flushed")
-        self.assertTrue(any(KC_A in r for r in reports), "A must be typed")
+        self.assertTrue(any(KC_A in r[3:] for r in reports), "A must be typed")
         self.assertFalse(any(KC_ENTER in r for r in reports), "the chord must not fire")
         self.kb.key_event(*self.J, False)
         self.kb.key_event(2, 1, False)

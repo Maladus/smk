@@ -40,10 +40,16 @@ void dynamic_keymap_save_base_layer(uint8_t layer);
 // QMK settings backing store, read by the tapping engine at runtime.
 uint16_t dynamic_keymap_tapping_term(void);
 void     dynamic_keymap_set_tapping_term(uint16_t term);
+uint16_t dynamic_keymap_flow_tap_term(void);
+void     dynamic_keymap_set_flow_tap_term(uint16_t term);
+uint16_t dynamic_keymap_quick_tap_term(void);
+void     dynamic_keymap_set_quick_tap_term(uint16_t term);
 bool     dynamic_keymap_permissive_hold(void);
 void     dynamic_keymap_set_permissive_hold(bool on);
 bool     dynamic_keymap_hold_on_other_key_press(void);
 void     dynamic_keymap_set_hold_on_other_key_press(bool on);
+bool     dynamic_keymap_retro_tapping(void);
+void     dynamic_keymap_set_retro_tapping(bool on);
 void     dynamic_keymap_reset_settings(void);
 
 // Dynamic-entry store: Vial combos, tap dances and key overrides. The tables
