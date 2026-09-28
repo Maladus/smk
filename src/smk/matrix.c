@@ -448,6 +448,23 @@ void matrix_send_keycode(uint16_t keycode, bool pressed)
 {
     dispatch_keycode(keycode, pressed);
 }
+
+// Replay of an event the tap/hold engine buffered while a decision was pending.
+// It re-enters the tap/hold decision (so a buffered second tap/hold key is armed
+// rather than dropped as a raw keycode) and otherwise takes the normal path. The
+// tap-dance, macro and combo engines are skipped: they already saw the event
+// before it was buffered, and feeding them twice would double-count it.
+void matrix_replay_key(uint8_t row, uint8_t col, bool pressed)
+{
+    const uint8_t  layer = pressed ? resolve_layer(row, col) : press_layer_get(row, col);
+    const uint16_t kc    = KEYMAP_GET(layer, row, col);
+
+    if (tapping_process_record(row, col, kc, pressed)) {
+        return;
+    }
+
+    matrix_process_key(row, col, pressed);
+}
 #endif // VIAL_ENABLE
 
 static void process_key_state(uint8_t row, uint8_t col, bool pressed)

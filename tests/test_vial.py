@@ -85,7 +85,9 @@ KC_DELETE = 0x004C
 KC_LEFT = 0x0050
 
 # Modifier bits (report.h / keycodes.h): bit 1 is Left Shift.
+MOD_LCTL = 0x01
 MOD_LSFT = 0x02
+MOD_LALT = 0x04
 
 QK_MOD_TAP = 0x2000
 QK_TO = 0x5200
@@ -997,6 +999,28 @@ class TestVialTapHold(unittest.TestCase):
         self.kb.key_event(SPC_ROW, SPC_COL, False)
         self.assertEqual(self.kb.layer_bits(), 0)
 
+    def test_two_layer_taps_share_the_layer_until_both_release(self):
+        """Two layer-tap keys on the same layer: releasing one keeps the layer
+        while the other is still held, and the layer clears with the last
+        release."""
+        self.kb.set_keycode(0, 0, 1, QK_LAYER_TAP | (2 << 8) | KC_A)
+        # Layer 2 has a keycode at (0, 1) by default; clear it so the second
+        # layer-tap resolves through to layer 0 while layer 2 is active.
+        self.kb.set_keycode(2, 0, 1, 0x0001)  # KC_TRANSPARENT
+        self.kb.set_tick(0)
+        self.kb.key_event(SPC_ROW, SPC_COL, True)
+        self.kb.set_tick(300)
+        self.kb.tapping_task()
+        self.assertEqual(self.kb.layer_bits(), 0x0004, "the first hold activates layer 2")
+        self.kb.set_tick(310)
+        self.kb.key_event(0, 1, True)
+        self.kb.set_tick(600)
+        self.kb.tapping_task()
+        self.kb.key_event(SPC_ROW, SPC_COL, False)
+        self.assertEqual(self.kb.layer_bits(), 0x0004, "the second key still holds layer 2")
+        self.kb.key_event(0, 1, False)
+        self.assertEqual(self.kb.layer_bits(), 0, "the layer clears with the last holder")
+
     def test_permissive_hold_on_other_release(self):
         self.kb.set_tick(0)
         self.kb.key_event(SPC_ROW, SPC_COL, True)
@@ -1086,6 +1110,106 @@ class TestVialModTap(unittest.TestCase):
         self.assertEqual(self.kb.report()[0], 0x20, "RSFT must set the right-shift bit")
         self.kb.key_event(SPC_ROW, SPC_COL, False)
         self.assertEqual(self.kb.report()[0], 0)
+
+    # --- rolling two home-row mods ----------------------------------------
+
+    def test_rolling_mod_taps_each_release_clears_its_own_mod(self):
+        """Hold MT(LSFT) past the term, then press MT(LALT). Each release must
+        clear only the modifier of its own key; a single decision slot used to
+        leave LSFT stuck when the second key took it over."""
+        self.kb.set_keycode(0, 0, 1, QK_MOD_TAP | (MOD_LALT << 8) | KC_B)
+        self.kb.set_tick(0)
+        self.kb.key_event(SPC_ROW, SPC_COL, True)
+        self.kb.set_tick(300)
+        self.kb.tapping_task()
+        self.assertEqual(self.kb.report()[0], MOD_LSFT, "the first hold applies LSFT")
+        self.kb.set_tick(310)
+        self.kb.key_event(0, 1, True)
+        self.kb.set_tick(600)
+        self.kb.tapping_task()
+        self.assertEqual(self.kb.report()[0], MOD_LSFT | MOD_LALT, "both holds apply")
+        self.kb.key_event(SPC_ROW, SPC_COL, False)
+        self.assertEqual(self.kb.report()[0], MOD_LALT, "releasing the first key clears LSFT")
+        self.kb.key_event(0, 1, False)
+        self.assertEqual(self.kb.report()[0], 0, "releasing the second key clears LALT")
+
+    def test_shared_mod_stays_until_the_last_holder_releases(self):
+        """Ctrl on both home-row mods: releasing one key must not drop the mod
+        while the other key still holds it."""
+        self.kb.set_keycode(0, SPC_ROW, SPC_COL, QK_MOD_TAP | (MOD_LCTL << 8) | KC_A)
+        self.kb.set_keycode(0, 0, 1, QK_MOD_TAP | (MOD_LCTL << 8) | KC_J)
+        self.kb.set_tick(0)
+        self.kb.key_event(SPC_ROW, SPC_COL, True)
+        self.kb.set_tick(300)
+        self.kb.tapping_task()
+        self.kb.set_tick(310)
+        self.kb.key_event(0, 1, True)
+        self.kb.set_tick(600)
+        self.kb.tapping_task()
+        self.assertEqual(self.kb.report()[0], MOD_LCTL)
+        self.kb.key_event(0, 1, False)
+        self.assertEqual(self.kb.report()[0], MOD_LCTL, "the first key still holds Ctrl")
+        self.kb.key_event(SPC_ROW, SPC_COL, False)
+        self.assertEqual(self.kb.report()[0], 0, "Ctrl clears with the last holder")
+
+    def test_repeat_press_while_held_does_not_leak_the_mod(self):
+        """A second press event on the same key while the hold is active (key
+        bounce) must not re-arm the decision and lose the release."""
+        self.kb.set_tick(0)
+        self.kb.key_event(SPC_ROW, SPC_COL, True)
+        self.kb.set_tick(300)
+        self.kb.tapping_task()
+        self.assertEqual(self.kb.report()[0], MOD_LSFT)
+        self.kb.set_tick(320)
+        self.kb.key_event(SPC_ROW, SPC_COL, True)  # bounce: press seen again
+        self.kb.set_tick(330)
+        self.kb.key_event(SPC_ROW, SPC_COL, False)
+        self.kb.set_tick(600)
+        self.kb.tapping_task()
+        self.assertEqual(self.kb.report()[0], 0, "the modifier must clear on release")
+
+    def test_alt_shift_tab_roll_leaves_no_mod_stuck(self):
+        """The window-switch roll that started this: hold L (Alt home-row mod),
+        press the Shift home-row mod, Tab, then release L. Alt must clear with
+        L, and Shift with its own release."""
+        self.kb.set_keycode(0, SPC_ROW, SPC_COL, QK_MOD_TAP | (MOD_LALT << 8) | KC_L)
+        self.kb.set_keycode(0, 0, 1, QK_MOD_TAP | (MOD_LSFT << 8) | KC_A)
+        self.kb.set_keycode(0, 1, 0, KC_TAB)
+        self.kb.set_tick(0)
+        self.kb.key_event(SPC_ROW, SPC_COL, True)
+        self.kb.set_tick(300)
+        self.kb.tapping_task()
+        self.kb.set_tick(310)
+        self.kb.key_event(0, 1, True)  # Shift home-row mod
+        self.kb.set_tick(320)
+        self.kb.key_event(1, 0, True)  # Alt+Shift+Tab
+        self.kb.set_tick(330)
+        self.kb.key_event(1, 0, False)
+        self.kb.set_tick(600)
+        self.kb.tapping_task()
+        self.kb.set_tick(610)
+        self.kb.key_event(SPC_ROW, SPC_COL, False)  # release L
+        self.assertEqual(self.kb.report()[0], MOD_LSFT, "Alt clears with L, Shift is still held")
+        self.kb.key_event(0, 1, False)
+        self.assertEqual(self.kb.report()[0], 0, "Shift clears with its own release")
+
+    def test_buffered_second_mod_tap_is_not_dropped(self):
+        """Press a mod-tap, press a second one under the term, release the
+        first: the buffered press must still resolve, so the second key taps its
+        keycode instead of being replayed as a raw keycode and dropped."""
+        self.kb.set_keycode(0, 0, 1, QK_MOD_TAP | (MOD_LALT << 8) | KC_B)
+        self.kb.set_tick(0)
+        self.kb.key_event(SPC_ROW, SPC_COL, True)
+        self.kb.set_tick(10)
+        self.kb.key_event(0, 1, True)  # buffered while the first decision pends
+        before = len(self.kb.ep1_reports())
+        self.kb.set_tick(20)
+        self.kb.key_event(SPC_ROW, SPC_COL, False)  # tap decides, replays the second press
+        self.kb.set_tick(30)
+        self.kb.key_event(0, 1, False)  # under the term, so it is a tap
+        reports = self.kb.ep1_reports()[before:]
+        self.assertTrue(any(KC_B in r for r in reports), f"the second mod-tap must tap B; {reports}")
+        self.assertEqual(self.kb.report()[0], 0, "both taps leave no modifier")
 
 
 # --- one-shot mod ----------------------------------------------------------

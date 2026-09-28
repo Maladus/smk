@@ -12,12 +12,20 @@
 #    include <stdbool.h>
 #    include <stdint.h>
 
-// Events held while the tap/hold decision is pending. Enough for a fast roll
-// plus the release of the LT key itself; older events are dropped if it fills.
+// One slot per tap/hold key that is down. A single global slot used to leak the
+// modifier or layer of the first key as soon as a second tap/hold key was
+// pressed (rolling home-row mods, or a re-press of the same key), because the
+// second press overwrote the bookkeeping the first key's release needed. Each
+// press now owns its slot, so a release only clears what its own press set.
+#    define TAPPING_SLOTS 8
+
+// Events held while a decision is pending. Enough for a fast roll plus the
+// release of the tap/hold key itself; older events are dropped if it fills.
 #    define TAPPING_BUFFER 8
 
 typedef struct {
-    bool     undecided;   // an LT/TT/MT press is waiting for the term
+    bool     used;
+    bool     undecided;   // waiting for the tapping term
     bool     hold_active; // decided hold; the layer/mod stays on until release
     bool     tap_toggle;  // tap toggles the layer (TT) instead of tapping a keycode
     bool     mod_tap;     // hold applies a modifier (MT) instead of a layer
@@ -27,132 +35,242 @@ typedef struct {
     uint8_t  hold_mods;
     uint16_t tap_keycode;
     uint32_t start_ms;
-    uint8_t  count;
-    uint8_t  ev_row[TAPPING_BUFFER];
-    uint8_t  ev_col[TAPPING_BUFFER];
-    bool     ev_pressed[TAPPING_BUFFER];
-} tapping_state_t;
+} tap_hold_t;
 
-static tapping_state_t tapping;
+static tap_hold_t slots[TAPPING_SLOTS];
+
+// Ring buffer of the events that arrived while a decision was pending.
+static uint8_t buf_row[TAPPING_BUFFER];
+static uint8_t buf_col[TAPPING_BUFFER];
+static bool    buf_pressed[TAPPING_BUFFER];
+static uint8_t buf_head;
+static uint8_t buf_count;
+static bool    replaying;
+
+static int8_t slot_find(uint8_t row, uint8_t col)
+{
+    for (uint8_t i = 0; i < TAPPING_SLOTS; i++) {
+        if (slots[i].used && slots[i].row == row && slots[i].col == col) {
+            return (int8_t)i;
+        }
+    }
+    return -1;
+}
+
+static int8_t slot_alloc(void)
+{
+    for (uint8_t i = 0; i < TAPPING_SLOTS; i++) {
+        if (!slots[i].used) {
+            return (int8_t)i;
+        }
+    }
+    return -1;
+}
+
+static bool any_undecided(void)
+{
+    for (uint8_t i = 0; i < TAPPING_SLOTS; i++) {
+        if (slots[i].used && slots[i].undecided) {
+            return true;
+        }
+    }
+    return false;
+}
 
 static void buffer_event(uint8_t row, uint8_t col, bool pressed)
 {
-    if (tapping.count >= TAPPING_BUFFER) {
+    if (buf_count >= TAPPING_BUFFER) {
         return;
     }
-    tapping.ev_row[tapping.count]     = row;
-    tapping.ev_col[tapping.count]     = col;
-    tapping.ev_pressed[tapping.count] = pressed;
-    tapping.count++;
+    const uint8_t tail = (uint8_t)((buf_head + buf_count) % TAPPING_BUFFER);
+    buf_row[tail]      = row;
+    buf_col[tail]      = col;
+    buf_pressed[tail]  = pressed;
+    buf_count++;
 }
 
-// Replays buffered events through the normal path, so they resolve under the
-// layer state the decision left behind.
+// Replays buffered events through the tap/hold decision first, so a second
+// tap/hold key that was buffered is armed instead of being dropped. Events that
+// arrive during the drain are appended and picked up by the same loop, which
+// keeps their order. The guard stops a re-entrant call from draining twice.
 static void replay(void)
 {
-    for (uint8_t i = 0; i < tapping.count; i++) {
-        matrix_process_key(tapping.ev_row[i], tapping.ev_col[i], tapping.ev_pressed[i]);
+    if (replaying) {
+        return;
     }
-    tapping.count = 0;
+    replaying = true;
+    while (buf_count > 0) {
+        const uint8_t row     = buf_row[buf_head];
+        const uint8_t col     = buf_col[buf_head];
+        const bool    pressed = buf_pressed[buf_head];
+        buf_head              = (uint8_t)((buf_head + 1) % TAPPING_BUFFER);
+        buf_count--;
+        matrix_replay_key(row, col, pressed);
+    }
+    replaying = false;
 }
 
-static void decide_hold(void)
+static void decide_hold(uint8_t i)
 {
-    tapping.undecided   = false;
-    tapping.hold_active = true;
-    if (tapping.mod_tap) {
-        add_mods(MODS_5BIT_TO_8BIT(tapping.hold_mods));
+    tap_hold_t *t  = &slots[i];
+    t->undecided   = false;
+    t->hold_active = true;
+    if (t->mod_tap) {
+        add_mods(MODS_5BIT_TO_8BIT(t->hold_mods));
         send_keyboard_report();
     } else {
-        matrix_layer_activate(tapping.hold_layer);
+        matrix_layer_activate(t->hold_layer);
     }
     replay();
 }
 
-static void decide_tap(void)
+static void decide_tap(uint8_t i)
 {
-    tapping.undecided = false;
-    if (tapping.tap_toggle) {
-        matrix_layer_toggle(tapping.hold_layer);
+    tap_hold_t *t = &slots[i];
+    t->undecided  = false;
+    t->used       = false; // a tap has nothing left to track
+    if (t->tap_toggle) {
+        matrix_layer_toggle(t->hold_layer);
     } else {
-        matrix_tap_keycode(tapping.tap_keycode);
+        matrix_tap_keycode(t->tap_keycode);
     }
     replay();
+}
+
+// Drops what this slot contributed. Mods and layers shared with another active
+// hold (Ctrl on both F and J, two keys on the same layer) stay on until the last
+// holder releases.
+static void release_hold(uint8_t i)
+{
+    tap_hold_t *t = &slots[i];
+
+    if (t->mod_tap) {
+        uint8_t still_held = 0;
+        for (uint8_t j = 0; j < TAPPING_SLOTS; j++) {
+            if (j != i && slots[j].used && slots[j].hold_active && slots[j].mod_tap) {
+                still_held |= MODS_5BIT_TO_8BIT(slots[j].hold_mods);
+            }
+        }
+        del_mods((uint8_t)(MODS_5BIT_TO_8BIT(t->hold_mods) & ~still_held));
+        send_keyboard_report();
+    } else {
+        bool still_held = false;
+        for (uint8_t j = 0; j < TAPPING_SLOTS; j++) {
+            if (j != i && slots[j].used && slots[j].hold_active && !slots[j].mod_tap && slots[j].hold_layer == t->hold_layer) {
+                still_held = true;
+            }
+        }
+        if (!still_held) {
+            matrix_layer_deactivate(t->hold_layer);
+        }
+    }
+
+    t->hold_active = false;
+    t->used        = false;
+}
+
+// Resolves every pending hold as a hold. Replay can arm another slot, so the
+// scan repeats until nothing is left undecided.
+static void resolve_all_holds(void)
+{
+    for (uint8_t pass = 0; pass < TAPPING_SLOTS; pass++) {
+        bool decided = false;
+        for (uint8_t i = 0; i < TAPPING_SLOTS; i++) {
+            if (slots[i].used && slots[i].undecided) {
+                decide_hold(i);
+                decided = true;
+            }
+        }
+        if (!decided) {
+            return;
+        }
+    }
 }
 
 // Arm the tap/hold decision for an LT (tap_keycode), TT (tap_toggle) or MT
-// (mod_tap) key.
-static void arm(uint8_t row, uint8_t col, uint8_t layer, uint8_t mods, uint16_t tap_keycode, bool tap_toggle, bool mod_tap)
+// (mod_tap) key. Returns false when the table is full, so the caller can let
+// the key through untouched instead of swallowing it.
+static bool arm(uint8_t row, uint8_t col, uint8_t layer, uint8_t mods, uint16_t tap_keycode, bool tap_toggle, bool mod_tap)
 {
+    const int8_t i = slot_alloc();
+    if (i < 0) {
+        return false;
+    }
     if (layer >= VIAL_LAYERS) {
         layer = (uint8_t)(VIAL_LAYERS - 1);
     }
-    tapping.undecided   = true;
-    tapping.hold_active = false;
-    tapping.tap_toggle  = tap_toggle;
-    tapping.mod_tap     = mod_tap;
-    tapping.row         = row;
-    tapping.col         = col;
-    tapping.hold_layer  = layer;
-    tapping.hold_mods   = mods;
-    tapping.tap_keycode = tap_keycode;
-    tapping.start_ms    = tick_ms();
-    tapping.count       = 0;
+
+    tap_hold_t *t  = &slots[i];
+    t->used        = true;
+    t->undecided   = true;
+    t->hold_active = false;
+    t->tap_toggle  = tap_toggle;
+    t->mod_tap     = mod_tap;
+    t->row         = row;
+    t->col         = col;
+    t->hold_layer  = layer;
+    t->hold_mods   = mods;
+    t->tap_keycode = tap_keycode;
+    t->start_ms    = tick_ms();
+    return true;
 }
 
 bool tapping_process_record(uint8_t row, uint8_t col, uint16_t keycode, bool pressed)
 {
-    if (tapping.undecided) {
-        if (row == tapping.row && col == tapping.col) {
+    const int8_t mine = slot_find(row, col);
+    if (mine >= 0) {
+        tap_hold_t *t = &slots[mine];
+        if (t->undecided) {
             if (!pressed) {
-                if ((tick_ms() - tapping.start_ms) < dynamic_keymap_tapping_term()) {
-                    decide_tap();
+                if ((tick_ms() - t->start_ms) < dynamic_keymap_tapping_term()) {
+                    decide_tap((uint8_t)mine);
                 } else {
-                    decide_hold();
+                    // Held past the term, so this is a hold. Replay the buffered
+                    // events under it, then drop it again: the key is already up,
+                    // so nothing may stay latched (tapping_task usually decides
+                    // this earlier; this is the path when it did not run).
+                    decide_hold((uint8_t)mine);
+                    release_hold((uint8_t)mine);
                 }
+            }
+            // A duplicate press (bounce or re-press) keeps the original
+            // decision pending instead of re-arming and losing the hold.
+            return true;
+        }
+        if (t->hold_active) {
+            if (!pressed) {
+                release_hold((uint8_t)mine);
             }
             return true;
         }
-
-        // Another key decides the hold early under the configured flags; process
-        // that event right away so it lands on the freshly activated layer.
-        if (pressed && dynamic_keymap_hold_on_other_key_press()) {
-            decide_hold();
-            return false;
-        }
-        if (!pressed && dynamic_keymap_permissive_hold()) {
-            decide_hold();
-            return false;
-        }
-
-        buffer_event(row, col, pressed);
-        return true;
+        t->used = false; // stale entry; should not happen
     }
 
-    if (tapping.hold_active && row == tapping.row && col == tapping.col && !pressed) {
-        tapping.hold_active = false;
-        if (tapping.mod_tap) {
-            del_mods(MODS_5BIT_TO_8BIT(tapping.hold_mods));
-            send_keyboard_report();
-        } else {
-            matrix_layer_deactivate(tapping.hold_layer);
+    // This key has no decision of its own. Its event may settle the pending
+    // holds of other keys.
+    if (any_undecided()) {
+        if (pressed && dynamic_keymap_hold_on_other_key_press()) {
+            resolve_all_holds();
+        } else if (!pressed && dynamic_keymap_permissive_hold()) {
+            resolve_all_holds();
+        } else if (!replaying) {
+            // Defer until a decision is made. A replayed event must not wait
+            // again, or the replay loop would spin on it forever.
+            buffer_event(row, col, pressed);
+            return true;
         }
-        return true;
     }
 
     if (pressed && IS_QK_MOD_TAP(keycode)) {
-        arm(row, col, 0, QK_MOD_TAP_GET_MODS(keycode), QK_MOD_TAP_GET_TAP_KEYCODE(keycode), false, true);
-        return true;
+        return arm(row, col, 0, QK_MOD_TAP_GET_MODS(keycode), QK_MOD_TAP_GET_TAP_KEYCODE(keycode), false, true);
     }
 
     if (pressed && IS_QK_LAYER_TAP(keycode)) {
-        arm(row, col, QK_LAYER_TAP_GET_LAYER(keycode), 0, QK_LAYER_TAP_GET_TAP_KEYCODE(keycode), false, false);
-        return true;
+        return arm(row, col, QK_LAYER_TAP_GET_LAYER(keycode), 0, QK_LAYER_TAP_GET_TAP_KEYCODE(keycode), false, false);
     }
 
     if (pressed && IS_QK_LAYER_TAP_TOGGLE(keycode)) {
-        arm(row, col, QK_LAYER_TAP_TOGGLE_GET_LAYER(keycode), 0, 0, true, false);
-        return true;
+        return arm(row, col, QK_LAYER_TAP_TOGGLE_GET_LAYER(keycode), 0, 0, true, false);
     }
 
     return false;
@@ -160,8 +278,10 @@ bool tapping_process_record(uint8_t row, uint8_t col, uint16_t keycode, bool pre
 
 void tapping_task(void)
 {
-    if (tapping.undecided && (tick_ms() - tapping.start_ms) >= dynamic_keymap_tapping_term()) {
-        decide_hold();
+    for (uint8_t i = 0; i < TAPPING_SLOTS; i++) {
+        if (slots[i].used && slots[i].undecided && (tick_ms() - slots[i].start_ms) >= dynamic_keymap_tapping_term()) {
+            decide_hold(i);
+        }
     }
 }
 
