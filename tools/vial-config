@@ -1,0 +1,286 @@
+#!/usr/bin/env python3
+"""vial-config: back up, restore and tweak an SMK/Vial keyboard over raw HID.
+
+Everything Vial can change is read into one JSON file: the keymap (all layers),
+the QMK settings (tapping term, permissive hold, ...), the dynamic entries (tap
+dances, combos, key overrides), the macro buffer and the RGB lighting values.
+`apply` writes a backup back, `set` changes single QMK settings.
+
+    tools/vial-config dump ~/rk61plus.json
+    tools/vial-config apply ~/rk61plus.json
+    tools/vial-config set 26=1 27=150 25=200
+    tools/vial-config show
+
+The raw-HID interface (usage page 0xFF60) is found under /sys/class/hidraw, so
+no VID:PID is needed; pass --device /dev/hidrawN to override. A udev rule for
+non-root access is in tools/udev/.
+"""
+
+import argparse
+import json
+import os
+import select
+import sys
+import time
+from pathlib import Path
+
+REPORT = 32
+RAW_HID_USAGE_PAGE = b"\x06\x60\xff\x09\x61"  # usage page 0xFF60, usage 0x61
+
+QSID_NAMES = {
+    7: ("tapping_term", "ms"),
+    22: ("permissive_hold", "bool"),
+    23: ("hold_on_other_key_press", "bool"),
+    24: ("retro_tapping", "bool"),
+    25: ("quick_tap_term", "ms"),
+    26: ("chordal_hold", "bool"),
+    27: ("flow_tap_term", "ms"),
+}
+
+
+def find_raw_hid():
+    """The hidraw node whose report descriptor declares the Vial collection."""
+    for node in sorted(Path("/sys/class/hidraw").glob("hidraw*")):
+        try:
+            desc = (node / "device" / "report_descriptor").read_bytes()
+        except OSError:
+            continue
+        if RAW_HID_USAGE_PAGE in desc:
+            return "/dev/" + node.name
+    raise SystemExit("no raw-HID (usage page 0xFF60) interface found; is the board plugged in?")
+
+
+class Device:
+    def __init__(self, path=None, timeout=1.0):
+        self.path = path or find_raw_hid()
+        self.timeout = timeout
+        self.fd = os.open(self.path, os.O_RDWR)
+
+    def close(self):
+        os.close(self.fd)
+
+    def _drain(self):
+        while select.select([self.fd], [], [], 0)[0]:
+            os.read(self.fd, REPORT)
+
+    def req(self, payload):
+        self._drain()
+        data = bytes(payload) + bytes(REPORT - len(payload))
+        os.write(self.fd, data)
+        if not select.select([self.fd], [], [], self.timeout)[0]:
+            raise SystemExit("no reply to %s" % bytes(payload[:4]).hex(" "))
+        return os.read(self.fd, REPORT)
+
+    # --- identification ---------------------------------------------------
+    def info(self):
+        proto = self.req([0x01])
+        layers = self.req([0x11])
+        kbid = self.req([0xFE, 0x00])
+        size = self.req([0xFE, 0x01])
+        return {
+            "device": self.path,
+            "usb_serial": read_sysfs("serial"),
+            "usb_product": read_sysfs("product"),
+            "protocol_version": proto[1] << 8 | proto[2],
+            "layers": layers[1],
+            "keyboard_id": kbid[2:kbid[1] + 2].decode(errors="replace"),
+            "definition_size": int.from_bytes(size[0:4], "little"),
+        }
+
+    # --- QMK settings -----------------------------------------------------
+    def qsids(self):
+        out = self.req([0xFE, 0x09])
+        found = []
+        for i in range(0, REPORT - 1, 2):
+            value = out[i] | (out[i + 1] << 8)
+            if value == 0xFFFF:
+                break
+            found.append(value)
+        return found
+
+    def get_setting(self, qsid):
+        out = self.req([0xFE, 0x0A, qsid & 0xFF, qsid >> 8])
+        if out[0] != 0:
+            return None
+        kind = QSID_NAMES.get(qsid, ("", "ms"))[1]
+        return out[1] if kind == "bool" else out[1] | (out[2] << 8)
+
+    def set_setting(self, qsid, value):
+        out = self.req([0xFE, 0x0B, qsid & 0xFF, qsid >> 8, value & 0xFF, (value >> 8) & 0xFF])
+        if out[0] != 0:
+            raise SystemExit(f"setting {qsid} refused the value {value}")
+
+    # --- keymap -----------------------------------------------------------
+    def keymap(self, layers, rows=5, cols=14):
+        keys = []
+        for offset in range(0, layers * rows * cols * 2, 28):
+            out = self.req([0x12, (offset >> 8) & 0xFF, offset & 0xFF, 28])
+            keys += [out[4 + i] << 8 | out[5 + i] for i in range(0, 28, 2)]
+        return keys
+
+    def set_keymap(self, keys):
+        for start in range(0, len(keys), 14):
+            chunk = keys[start:start + 14]
+            offset = start * 2
+            payload = [0x13, (offset >> 8) & 0xFF, offset & 0xFF, len(chunk) * 2]
+            for kc in chunk:
+                payload += [kc >> 8, kc & 0xFF]
+            self.req(payload)
+
+    # --- dynamic entries --------------------------------------------------
+    def entries(self):
+        counts = self.req([0xFE, 0x0D, 0x00])
+        # counts[0] is the tap dance table, then combo, key override, alt repeat.
+        out = {"counts": {"tap_dance": counts[0], "combo": counts[1], "key_override": counts[2]}}
+        for name, get_op in (("tap_dance", 0x01), ("combo", 0x03), ("key_override", 0x05)):
+            items = []
+            for index in range(out["counts"][name]):
+                reply = self.req([0xFE, 0x0D, get_op, index])
+                items.append(list(reply[1:11]) if reply[0] == 0 else None)
+            out[name] = items
+        return out
+
+    def set_entries(self, data):
+        for name, set_op in (("tap_dance", 0x02), ("combo", 0x04), ("key_override", 0x06)):
+            for index, entry in enumerate(data.get(name) or []):
+                if entry is None:
+                    continue
+                reply = self.req([0xFE, 0x0D, set_op, index] + list(entry[:10]))
+                if reply[0] != 0:
+                    raise SystemExit(f"{name}[{index}] refused")
+
+    # --- macros -----------------------------------------------------------
+    def macros(self):
+        count = self.req([0x0C])[1]
+        size = self.req([0x0D])
+        total = size[1] << 8 | size[2]
+        blob = bytearray()
+        for offset in range(0, total, 28):
+            out = self.req([0x0E, (offset >> 8) & 0xFF, offset & 0xFF, min(28, total - offset)])
+            blob += out[4:4 + min(28, total - offset)]
+        return {"count": count, "size": total, "buffer": blob.hex()}
+
+    def set_macros(self, data):
+        blob = bytes.fromhex(data["buffer"])
+        for offset in range(0, len(blob), 28):
+            chunk = blob[offset:offset + 28]
+            payload = [0x0F, (offset >> 8) & 0xFF, offset & 0xFF, len(chunk)] + list(chunk)
+            self.req(payload)
+
+    # --- lighting (VIA custom values, RGB matrix channel) -----------------
+    LIGHTING = {"brightness": 1, "effect": 2, "speed": 3, "color": 4}
+
+    def lighting(self):
+        return {name: self.req([0x08, 3, vid])[3] for name, vid in self.LIGHTING.items()}
+
+    def set_lighting(self, data):
+        for name, vid in self.LIGHTING.items():
+            if name in data:
+                self.req([0x07, 3, vid, data[name]])
+        self.req([0x09, 3])  # save
+
+    # --- unlock -----------------------------------------------------------
+    def unlock(self):
+        self.req([0xFE, 0x06])  # unlock start; this firmware unlocks at once
+        for _ in range(20):
+            if self.req([0xFE, 0x07])[0]:
+                return
+            time.sleep(0.05)
+        raise SystemExit("keyboard did not unlock for writing")
+
+
+def read_sysfs(name):
+    for node in Path("/sys/class/hidraw").glob("hidraw*"):
+        path = node / "device" / ".." / ".." / name
+        try:
+            return path.read_text().strip()
+        except OSError:
+            continue
+    return None
+
+
+def dump(dev):
+    info = dev.info()
+    qsids = dev.qsids()
+    return {
+        "info": info,
+        "qmk_settings": {QSID_NAMES.get(q, (f"qsid_{q}", "ms"))[0]: dev.get_setting(q) for q in qsids},
+        "qsids": qsids,
+        "keymap": dev.keymap(info["layers"]),
+        "entries": dev.entries(),
+        "macros": dev.macros(),
+        "lighting": dev.lighting(),
+    }
+
+
+def show(dev):
+    info = dev.info()
+    print(f"{info['device']}  serial {info['usb_serial']}  protocol {info['protocol_version']}  "
+          f"layers {info['layers']}  definition {info['definition_size']} B")
+    qsids = dev.qsids()
+    print(f"QMK settings advertised: {qsids}")
+    for qsid in qsids:
+        name, kind = QSID_NAMES.get(qsid, (f"qsid {qsid}", "ms"))
+        value = dev.get_setting(qsid)
+        print(f"  {name:26s} {value}{' ms' if kind == 'ms' else ''}")
+    missing = sorted(set(QSID_NAMES) - set(qsids))
+    if missing:
+        print(f"  (not in this firmware: {', '.join(QSID_NAMES[q][0] for q in missing)})")
+    lighting = dev.lighting()
+    print("lighting: " + ", ".join(f"{k}={v}" for k, v in lighting.items()))
+
+
+def main():
+    parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
+    parser.add_argument("--device", help="hidraw node of the raw-HID interface")
+    sub = parser.add_subparsers(dest="cmd", required=True)
+    sub.add_parser("show", help="print the settings")
+    dump_p = sub.add_parser("dump", help="write a backup")
+    dump_p.add_argument("file")
+    apply_p = sub.add_parser("apply", help="write a backup back")
+    apply_p.add_argument("file")
+    apply_p.add_argument("--no-entries", action="store_true", help="keymap and settings only")
+    set_p = sub.add_parser("set", help="set QMK settings, e.g. 26=1 27=150")
+    set_p.add_argument("pairs", nargs="+")
+    args = parser.parse_args()
+
+    dev = Device(args.device)
+    try:
+        if args.cmd == "show":
+            show(dev)
+        elif args.cmd == "dump":
+            data = dump(dev)
+            Path(args.file).write_text(json.dumps(data, indent=1) + "\n")
+            print(f"wrote {args.file}: {len(data['keymap'])} keys, {len(data['qsids'])} settings, "
+                  f"{data['macros']['count']} macros, {sum(1 for k in data['entries']['counts'])} entry tables")
+        elif args.cmd == "apply":
+            data = json.loads(Path(args.file).read_text())
+            dev.unlock()
+            layers = data["info"]["layers"]
+            dev.set_keymap(data["keymap"][:layers * 5 * 14])
+            for name, value in data["qmk_settings"].items():
+                qsid = next((q for q, (n, _) in QSID_NAMES.items() if n == name), None)
+                if qsid is not None and value is not None and qsid in dev.qsids():
+                    dev.set_setting(qsid, value)
+            if not args.no_entries:
+                dev.set_entries(data.get("entries") or {})
+                dev.set_macros(data["macros"])
+                dev.set_lighting(data.get("lighting") or {})
+            print(f"applied {args.file}")
+        elif args.cmd == "set":
+            dev.unlock()
+            available = dev.qsids()
+            for pair in args.pairs:
+                qsid_s, _, value_s = pair.partition("=")
+                qsid, value = int(qsid_s, 0), int(value_s, 0)
+                if qsid not in available:
+                    raise SystemExit(f"qsid {qsid} is not in this firmware ({available})")
+                dev.set_setting(qsid, value)
+                name, kind = QSID_NAMES.get(qsid, (str(qsid), "ms"))
+                print(f"{name} = {value}{' ms' if kind == 'ms' else ''}")
+    finally:
+        dev.close()
+
+
+if __name__ == "__main__":
+    sys.exit(main())
