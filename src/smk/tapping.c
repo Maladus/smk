@@ -135,6 +135,11 @@ static bool flow_tap_applies(uint16_t tap_keycode)
     if (term == 0 || replaying || !is_flow_tap_key(tap_keycode) || !is_flow_tap_key(last_key_kc)) {
         return false;
     }
+    // A hotkey (Ctrl/Gui/Alt held) is never a typing flow: Ctrl+F must stay a
+    // modifier chord, not turn into a tap of F.
+    if (get_mods() & (MOD_BIT(KC_LEFT_CTRL) | MOD_BIT(KC_RIGHT_CTRL) | MOD_BIT(KC_LEFT_GUI) | MOD_BIT(KC_RIGHT_GUI) | MOD_BIT(KC_LEFT_ALT))) {
+        return false;
+    }
     return (tick_ms() - last_key_ms) < term;
 }
 
@@ -156,6 +161,25 @@ static bool quick_tap_applies(uint8_t row, uint8_t col)
         }
     }
     return false;
+}
+
+// Chordal hold (QMK's CHORDAL_HOLD): which hand a key is on decides whether a
+// pair of keys is a chord or a roll. Two keys on the same hand are a roll, so an
+// undecided tap/hold key settles as a tap the moment the other key arrives
+// instead of waiting for the term: the letter appears at once and a rolled
+// home-row mod can never eat it. Opposite hands (or a thumb key, marked '*') are
+// a chord, and the hold flags decide when it settles.
+//
+// Handedness comes from the matrix position, which LAYOUT_60 lays out in
+// physical order: columns 0-5 are the left half and 6-13 the right half on every
+// row above the bottom one. The bottom row is thumb and modifier keys, exempt
+// from the rule so they chord with anything.
+static char hand_of(uint8_t row, uint8_t col)
+{
+    if (row >= MATRIX_ROWS - 1) {
+        return '*';
+    }
+    return (col <= 5) ? 'L' : 'R';
 }
 
 static void buffer_event(uint8_t row, uint8_t col, bool pressed)
@@ -250,6 +274,38 @@ static void release_hold(uint8_t i)
 
     t->hold_active = false;
     t->used        = false;
+}
+
+// Settles the undecided tap/hold keys this key rolls with (same hand) as taps.
+// A tap/hold key on the other side stays pending: it may be the first half of a
+// multi-mod chord, and the hold flags decide it. Returns true when anything was
+// settled; the caller then keeps this event in order instead of waiting.
+static bool settle_rolls(uint8_t row, uint8_t col, uint16_t keycode)
+{
+    if (!dynamic_keymap_chordal_hold()) {
+        return false;
+    }
+    // A tap/hold key is never rolled over by another one: two of them pressed
+    // together are a chord (Ctrl+Shift), not two letters.
+    if (IS_QK_MOD_TAP(keycode) || IS_QK_LAYER_TAP(keycode) || IS_QK_LAYER_TAP_TOGGLE(keycode)) {
+        return false;
+    }
+
+    const char hand = hand_of(row, col);
+    bool       any  = false;
+    for (uint8_t i = 0; i < TAPPING_SLOTS; i++) {
+        tap_hold_t *t = &slots[i];
+        if (!t->used || !t->undecided) {
+            continue;
+        }
+        const char other = hand_of(t->row, t->col);
+        if (hand == '*' || other == '*' || hand != other) {
+            continue; // a chord: leave it to the hold flags
+        }
+        decide_tap(i);
+        any = true;
+    }
+    return any;
 }
 
 // Resolves every pending hold as a hold. Replay can arm another slot, so the
@@ -413,15 +469,18 @@ bool tapping_process_record(uint8_t row, uint8_t col, uint16_t keycode, bool pre
     // This key has no decision of its own. Its event may settle the pending
     // holds of other keys.
     if (any_undecided()) {
-        if (pressed && dynamic_keymap_hold_on_other_key_press()) {
-            resolve_all_holds();
-        } else if (!pressed && dynamic_keymap_permissive_hold()) {
-            resolve_all_holds();
-        } else if (!replaying) {
+        // Same-hand rolls settle as taps here, so nothing is left to wait for.
+        const bool rolled = settle_rolls(row, col, keycode);
+        const bool wait   = rolled || (pressed ? !dynamic_keymap_hold_on_other_key_press() : !dynamic_keymap_permissive_hold());
+        if (any_undecided() && wait) {
             // Defer until a decision is made. A replayed event must not wait
             // again, or the replay loop would spin on it forever.
-            buffer_event(row, col, pressed);
-            return true;
+            if (!replaying) {
+                buffer_event(row, col, pressed);
+                return true;
+            }
+        } else if (any_undecided()) {
+            resolve_all_holds();
         }
     }
 

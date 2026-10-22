@@ -50,6 +50,8 @@ bool     dynamic_keymap_hold_on_other_key_press(void);
 void     dynamic_keymap_set_hold_on_other_key_press(bool on);
 bool     dynamic_keymap_retro_tapping(void);
 void     dynamic_keymap_set_retro_tapping(bool on);
+bool     dynamic_keymap_chordal_hold(void);
+void     dynamic_keymap_set_chordal_hold(bool on);
 void     dynamic_keymap_reset_settings(void);
 
 // Dynamic-entry store: Vial combos, tap dances and key overrides. The tables

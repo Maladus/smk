@@ -340,6 +340,57 @@ The GPIO pins P4.3, P4.5, P4.6, P0.5, P7.4 are not part of the RGB matrix (no
 PWM channel maps to them) — they are driven in the "park" routine and are likely
 USB-hub/charging control lines.
 
+## Tap/hold and home-row mods
+
+`src/smk/tapping.c` decides MT/LT/TT keys. A press is held back until the
+tapping term (default 200 ms) or until another key settles it, so the settings
+below are what makes home-row mods feel right. All of them are in Vial's QMK
+Settings tab and live in the keymap store, so they survive a reflash.
+
+| Setting | qsid | Default | Effect |
+| --- | --- | --- | --- |
+| Tapping term | 7 | 200 ms | How long a press may stay undecided. |
+| Permissive hold | 22 | on | Another key pressed *and released* while a tap/hold key is down makes it a hold. |
+| Hold on other key press | 23 | off | Another key's *press* makes it a hold at once. |
+| Retro tapping | 24 | off | A hold with no other key pressed taps its keycode on release. |
+| Quick tap term | 25 | off (0) | Pressing a tap/hold key again within the window repeats the tap, which keeps auto-repeat. QMK defaults this to the tapping term. |
+| Chordal hold | 26 | off | Same-hand pairs are rolls, opposite hands are chords (see below). |
+| Flow tap term | 27 | off (0) | A tap/hold key that follows a typed key inside the window taps at once, so fast typing never turns a letter into a modifier. QMK's value is 150 ms. |
+
+Chordal hold implements QMK's `CHORDAL_HOLD`: an undecided tap/hold key settles
+as a **tap the moment another key on the same hand goes down**, instead of
+waiting for the term, so a rolled home-row mod can never eat the letter or hold
+the next key back. Opposite hands stay a chord and permissive hold or hold on
+other key press decide when it settles. Handedness comes from the matrix
+position (`LAYOUT_60` lays the keys out in physical order): columns 0-5 are the
+left half and 6-13 the right half above the bottom row, and the bottom row
+(thumb and modifier keys) is exempt so those chord with anything. Two tap/hold
+keys pressed together are never a roll - Ctrl+Shift chords keep working.
+
+Measured in the simulator (F = `MT(LCTL, F)`, D = `KC_D`, both left hand, D
+pressed 40 ms after F):
+
+| Settings | Result |
+| --- | --- |
+| Defaults | D's press waits for F's release (90 ms here); with permissive hold the release turns F into Ctrl and the letter is lost. |
+| Chordal hold | `f` and `d` both go out at 40 ms, no modifier, no wait. |
+
+A home-row mod recipe that the measurements above support: Chordal Hold on,
+Flow Tap 150 ms, Permissive Hold or Hold On Other Key Press on (not both off),
+and a tapping term of 160-200 ms. Chordal Hold and Flow Tap need Vial 0.7.4 or
+newer to show up in the QMK Settings tab.
+
+### Simulator stack limit
+
+The simulator's cold calls (`key_event`, `tapping_task`, `vial`) stage their
+return address at 0x86/0x87 and set SP to 0x87, so the firmware runs with 121
+bytes of stack instead of the 221 it has from the main loop (`__start__stack` is
+0x22). A permissive-hold decision replays the buffered press through a full
+report send, which needs about 125 bytes and therefore overflows *in the
+simulator only* - the press is then silently lost. Tests that need that path
+should use hold on other key press (no replay, the press goes straight out) or
+stage the return frame at 0x23/0x24; see `TestVialChordalHold`.
+
 ## Code Options
 
 TBD — not yet traced on this board.

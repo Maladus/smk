@@ -6,7 +6,8 @@ work with effort and implementation notes.
 ## Implemented
 
 - Keymap remap: get/set/reset keycode, keymap buffer get/set, layer count.
-- QMK settings: tap term, permissive hold, hold on other key press.
+- QMK settings: tap term, permissive hold, hold on other key press, retro
+  tapping, quick tap term, chordal hold, flow tap term.
 - Matrix tester (switch matrix state).
 - Unlock/lock, keyboard id, size, definition.
 - Layer keys: MO, TG, TO, DF, persistent DF, LM, OSL, LT, TT.

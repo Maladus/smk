@@ -70,7 +70,9 @@ MATRIX_COLS = 14
 KC_A = 0x0004
 KC_B = 0x0005
 KC_C = 0x0006
+KC_D = 0x0007
 KC_E = 0x0008
+KC_F = 0x0009
 KC_J = 0x000D
 KC_K = 0x000E
 KC_L = 0x000F
@@ -713,9 +715,9 @@ class TestVialProtocol(unittest.TestCase):
 
     def test_qmk_settings_query(self):
         out = self.kb.vial([0xFE, 0x09])
-        qsids = [out[i] | (out[i + 1] << 8) for i in range(0, 12, 2)]
-        self.assertEqual(qsids, [7, 22, 23, 24, 25, 27])
-        self.assertEqual(out[12] | (out[13] << 8), 0xFFFF, "the list is 0xFFFF-terminated")
+        qsids = [out[i] | (out[i + 1] << 8) for i in range(0, 14, 2)]
+        self.assertEqual(qsids, [7, 22, 23, 24, 25, 26, 27])
+        self.assertEqual(out[14] | (out[15] << 8), 0xFFFF, "the list is 0xFFFF-terminated")
 
     def test_retro_and_quick_tap_settings_roundtrip(self):
         self.assertEqual(self.kb.vial([0xFE, 0x0A, 24, 0x00])[1], 0, "retro tapping is off by default")
@@ -1405,6 +1407,132 @@ class TestVialModTap(unittest.TestCase):
         reports = self.kb.ep1_reports()[before:]
         self.assertTrue(any(KC_B in r[3:] for r in reports), f"the second mod-tap must tap B; {reports}")
         self.assertEqual(self.kb.report()[0], 0, "both taps leave no modifier")
+
+
+# --- chordal hold ----------------------------------------------------------
+
+
+class TestVialChordalHold(unittest.TestCase):
+    """Chordal Hold (QMK's CHORDAL_HOLD): a tap/hold key and the key pressed
+    after it are a roll when both are on the same hand, so the tap/hold key
+    settles as a tap at once instead of waiting for the tapping term. Opposite
+    hands stay a chord and the hold flags decide them.
+
+    Home-row mods live on the caps row: A(1) S(2) D(3) F(4) G(5) are the left
+    hand, H(6) J(7) K(8) L(9) are the right hand.
+    """
+
+    S_ROW, S_COL = 2, 2
+    D_ROW, D_COL = 2, 3
+    F_ROW, F_COL = 2, 4
+    J_ROW, J_COL = 2, 7
+    K_ROW, K_COL = 2, 8
+
+    def setUp(self):
+        self.kb = VialSim()
+        self.kb.boot_usb()
+        self.kb.vial([0xFE, 0x0B, 26, 0x00, 0x01])  # chordal hold on
+        # Hold On Other Key Press settles a chord on the other key's press. That
+        # keeps the chord tests off the permissive-hold path, which replays a
+        # buffered press through a full report send: deeper than the simulator's
+        # cold-call stack (it stages the return frame at 0x86/0x87, leaving 121
+        # bytes of the 221 the firmware has when it runs from the main loop).
+        self.kb.vial([0xFE, 0x0B, 23, 0x00, 0x01])
+        self.kb.set_keycode(0, self.F_ROW, self.F_COL, QK_MOD_TAP | (MOD_LCTL << 8) | KC_F)
+        self.kb.set_keycode(0, self.D_ROW, self.D_COL, KC_D)
+        self.kb.set_keycode(0, self.K_ROW, self.K_COL, KC_K)
+
+    def tearDown(self):
+        self.kb.close()
+
+    def test_same_hand_roll_taps_at_once(self):
+        """F (left) then D (left) inside the term: both letters go out at the
+        moment D is pressed, with no modifier and no wait for the term."""
+        self.kb.set_tick(0)
+        self.kb.key_event(self.F_ROW, self.F_COL, True)
+        before = len(self.kb.ep1_reports())
+        self.kb.set_tick(40)
+        self.kb.key_event(self.D_ROW, self.D_COL, True)  # same hand: a roll
+        reports = self.kb.ep1_reports()[before:]
+        self.assertTrue(any(KC_F in r[3:] for r in reports), f"F taps at once; {reports}")
+        self.assertTrue(any(KC_D in r[3:] for r in reports), f"D goes out behind it; {reports}")
+        self.assertEqual(self.kb.report()[0], 0, "a rolled home-row mod never applies its modifier")
+        self.kb.key_event(self.D_ROW, self.D_COL, False)
+        self.kb.key_event(self.F_ROW, self.F_COL, False)
+        self.assertEqual(self.kb.report()[0], 0)
+
+    def test_same_hand_roll_needs_chordal_hold(self):
+        """The same roll without Chordal Hold waits for the tap/hold key's
+        release, which is the lag Chordal Hold removes."""
+        self.kb.vial([0xFE, 0x0B, 26, 0x00, 0x00])  # chordal hold off
+        self.kb.vial([0xFE, 0x0B, 23, 0x00, 0x00])  # hold on other key press off
+        self.kb.set_tick(0)
+        self.kb.key_event(self.F_ROW, self.F_COL, True)
+        before = len(self.kb.ep1_reports())
+        self.kb.set_tick(40)
+        self.kb.key_event(self.D_ROW, self.D_COL, True)
+        self.assertEqual(len(self.kb.ep1_reports()), before, "the roll waits for the term")
+        self.kb.set_tick(90)
+        self.kb.key_event(self.F_ROW, self.F_COL, False)  # release decides the tap
+        reports = self.kb.ep1_reports()[before:]
+        self.assertTrue(any(KC_F in r[3:] for r in reports), f"F taps on release; {reports}")
+        self.kb.key_event(self.D_ROW, self.D_COL, False)
+
+    def test_opposite_hand_pair_is_a_chord(self):
+        """F (left) and K (right) are a chord: the modifier applies before the
+        chord key goes out, and the tap/hold key never types its letter."""
+        self.kb.set_tick(0)
+        self.kb.key_event(self.F_ROW, self.F_COL, True)
+        self.kb.set_tick(40)
+        before = len(self.kb.ep1_reports())
+        self.kb.key_event(self.K_ROW, self.K_COL, True)  # opposite hand: a chord
+        self.assertEqual(self.kb.report()[0], MOD_LCTL, "the chord applies the modifier")
+        reports = self.kb.ep1_reports()[before:]
+        self.assertTrue(any(KC_K in r[3:] for r in reports), f"K goes out under Ctrl; {reports}")
+        self.assertFalse(any(KC_F in r[3:] for r in self.kb.ep1_reports()), "a chord never types F")
+        self.kb.key_event(self.K_ROW, self.K_COL, False)
+        self.kb.key_event(self.F_ROW, self.F_COL, False)
+        self.assertEqual(self.kb.report()[0], 0)
+
+    def test_two_mod_taps_stay_a_chord(self):
+        """Two tap/hold keys on the same hand are not a roll: they are a chord
+        (Ctrl+Shift), so the hold wins even with Chordal Hold on."""
+        self.kb.set_keycode(0, self.S_ROW, self.S_COL, QK_MOD_TAP | (MOD_LSFT << 8) | KC_A)
+        self.kb.set_tick(0)
+        self.kb.key_event(self.F_ROW, self.F_COL, True)
+        self.kb.set_tick(40)
+        self.kb.key_event(self.S_ROW, self.S_COL, True)  # same hand, still a chord
+        self.kb.set_tick(600)
+        self.kb.tapping_task()
+        self.assertEqual(self.kb.report()[0], MOD_LCTL | MOD_LSFT, "both holds apply")
+        self.assertFalse(any(KC_F in r[3:] for r in self.kb.ep1_reports()), "no letter leaks")
+        self.kb.key_event(self.S_ROW, self.S_COL, False)
+        self.kb.key_event(self.F_ROW, self.F_COL, False)
+        self.assertEqual(self.kb.report()[0], 0)
+
+    def test_bottom_row_chords_with_anything(self):
+        """Thumb and bottom-row keys are exempt, so a layer-tap space still
+        holds its layer for a key on either hand."""
+        self.kb.set_keycode(0, SPC_ROW, SPC_COL, QK_LAYER_TAP | (2 << 8) | KC_SPC)
+        self.kb.set_keycode(2, self.D_ROW, self.D_COL, KC_LEFT)
+        self.kb.set_tick(0)
+        self.kb.key_event(SPC_ROW, SPC_COL, True)
+        self.kb.set_tick(40)
+        before = len(self.kb.ep1_reports())
+        self.kb.key_event(self.D_ROW, self.D_COL, True)  # left hand, still a chord
+        self.assertEqual(self.kb.layer_bits(), 0x0004, "the layer is held, not tapped")
+        reports = self.kb.ep1_reports()[before:]
+        self.assertTrue(any(KC_LEFT in r[3:] for r in reports), f"the key resolves on layer 2; {reports}")
+        self.kb.key_event(self.D_ROW, self.D_COL, False)
+        self.kb.key_event(SPC_ROW, SPC_COL, False)
+        self.assertEqual(self.kb.layer_bits(), 0)
+
+    def test_chordal_hold_setting_roundtrip(self):
+        self.assertEqual(self.kb.vial([0xFE, 0x0A, 26, 0x00])[1], 1, "chordal hold is on")
+        self.kb.vial([0xFE, 0x0B, 26, 0x00, 0x00])
+        self.assertEqual(self.kb.vial([0xFE, 0x0A, 26, 0x00])[1], 0)
+        self.kb.vial([0xFE, 0x0C])  # reset
+        self.assertEqual(self.kb.vial([0xFE, 0x0A, 26, 0x00])[1], 0, "reset turns chordal hold off")
 
 
 # --- one-shot mod ----------------------------------------------------------

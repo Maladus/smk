@@ -50,6 +50,7 @@
 #    define KM_FLAG_PERMISSIVE_HOLD 0x01u
 #    define KM_FLAG_HOLD_ON_OTHER   0x02u
 #    define KM_FLAG_RETRO_TAPPING   0x04u
+#    define KM_FLAG_CHORDAL_HOLD    0x08u
 
 #    define KM_TAPPING_TERM_DEFAULT   200u
 #    define KM_TAPPING_TERM_MAX       10000u
@@ -1025,6 +1026,21 @@ bool dynamic_keymap_retro_tapping(void)
 void dynamic_keymap_set_retro_tapping(bool on)
 {
     const uint8_t flags = on ? (uint8_t)(hold_flags | KM_FLAG_RETRO_TAPPING) : (uint8_t)(hold_flags & ~KM_FLAG_RETRO_TAPPING);
+    if (flags == hold_flags) {
+        return;
+    }
+    hold_flags = flags;
+    store_write_settings();
+}
+
+bool dynamic_keymap_chordal_hold(void)
+{
+    return (hold_flags & KM_FLAG_CHORDAL_HOLD) != 0;
+}
+
+void dynamic_keymap_set_chordal_hold(bool on)
+{
+    const uint8_t flags = on ? (uint8_t)(hold_flags | KM_FLAG_CHORDAL_HOLD) : (uint8_t)(hold_flags & ~KM_FLAG_CHORDAL_HOLD);
     if (flags == hold_flags) {
         return;
     }

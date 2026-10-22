@@ -116,6 +116,7 @@ static const __code uint8_t vial_key_table[VIAL_KEY_TABLE_SIZE] = {0};
 #    define QMK_SETTING_HOLD_ON_OTHER_KEY_PRESS 23
 #    define QMK_SETTING_RETRO_TAPPING           24
 #    define QMK_SETTING_QUICK_TAP_TERM          25
+#    define QMK_SETTING_CHORDAL_HOLD            26
 #    define QMK_SETTING_FLOW_TAP_TERM           27
 
 // Unlock: Vial refuses to write until the host completes an unlock handshake.
@@ -226,7 +227,7 @@ static void vial_unlock_poll(uint8_t *out)
 // 16-bit values, 0xFFFF-terminated (and padded).
 static void vial_qmk_settings_query(uint8_t *out)
 {
-    static const __code uint16_t qsids[] = {QMK_SETTING_TAPPING_TERM, QMK_SETTING_PERMISSIVE_HOLD, QMK_SETTING_HOLD_ON_OTHER_KEY_PRESS, QMK_SETTING_RETRO_TAPPING, QMK_SETTING_QUICK_TAP_TERM, QMK_SETTING_FLOW_TAP_TERM};
+    static const __code uint16_t qsids[] = {QMK_SETTING_TAPPING_TERM, QMK_SETTING_PERMISSIVE_HOLD, QMK_SETTING_HOLD_ON_OTHER_KEY_PRESS, QMK_SETTING_RETRO_TAPPING, QMK_SETTING_QUICK_TAP_TERM, QMK_SETTING_CHORDAL_HOLD, QMK_SETTING_FLOW_TAP_TERM};
     uint8_t                      i       = 0;
     for (uint8_t n = 0; n < sizeof(qsids) / sizeof(qsids[0]); n++) {
         out[i++] = (uint8_t)(qsids[n] & 0xFF);
@@ -259,6 +260,9 @@ static void vial_qmk_settings_get(const uint8_t *in, uint8_t *out)
             break;
         case QMK_SETTING_RETRO_TAPPING:
             out[1] = dynamic_keymap_retro_tapping() ? 1 : 0;
+            break;
+        case QMK_SETTING_CHORDAL_HOLD:
+            out[1] = dynamic_keymap_chordal_hold() ? 1 : 0;
             break;
         case QMK_SETTING_QUICK_TAP_TERM: {
             const uint16_t term = dynamic_keymap_quick_tap_term();
@@ -299,6 +303,9 @@ static void vial_qmk_settings_set(const uint8_t *in, uint8_t *out)
             break;
         case QMK_SETTING_RETRO_TAPPING:
             dynamic_keymap_set_retro_tapping(in[4] != 0);
+            break;
+        case QMK_SETTING_CHORDAL_HOLD:
+            dynamic_keymap_set_chordal_hold(in[4] != 0);
             break;
         case QMK_SETTING_QUICK_TAP_TERM:
             dynamic_keymap_set_quick_tap_term(rd16le(in + 4));
