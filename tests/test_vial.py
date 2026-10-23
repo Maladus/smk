@@ -73,6 +73,7 @@ KC_C = 0x0006
 KC_D = 0x0007
 KC_E = 0x0008
 KC_F = 0x0009
+KC_S = 0x0016
 KC_J = 0x000D
 KC_K = 0x000E
 KC_L = 0x000F
@@ -91,6 +92,8 @@ KC_LEFT = 0x0050
 MOD_LCTL = 0x01
 MOD_LSFT = 0x02
 MOD_LALT = 0x04
+MOD_RCTL = 0x11
+MOD_RSFT = 0x12
 
 QK_MOD_TAP = 0x2000
 QK_TO = 0x5200
@@ -1407,6 +1410,143 @@ class TestVialModTap(unittest.TestCase):
         reports = self.kb.ep1_reports()[before:]
         self.assertTrue(any(KC_B in r[3:] for r in reports), f"the second mod-tap must tap B; {reports}")
         self.assertEqual(self.kb.report()[0], 0, "both taps leave no modifier")
+
+    def test_release_after_a_replayed_press_does_not_latch_the_mod(self):
+        """Roll two mod-taps and release the second while the first is still
+        undecided: the buffered press is replayed behind the hold decision, so
+        its release must land on that press. Treated as a stray release it left
+        the slot undecided with the key already up, and the term then latched a
+        modifier that no release could clear."""
+        self.kb.set_keycode(0, 2, 2, QK_MOD_TAP | (MOD_LALT << 8) | KC_S)
+        self.kb.set_keycode(0, 2, 4, QK_MOD_TAP | (MOD_LSFT << 8) | KC_F)
+        self.kb.set_tick(0)
+        self.kb.key_event(2, 2, True)   # Alt mod-tap, undecided
+        self.kb.set_tick(40)
+        self.kb.key_event(2, 4, True)   # Shift mod-tap, buffered behind it
+        before = len(self.kb.ep1_reports())
+        self.kb.set_tick(70)
+        self.kb.key_event(2, 4, False)  # permissive hold: Alt applies, F is replayed
+        reports = self.kb.ep1_reports()[before:]
+        self.assertTrue(any(KC_F in r[3:] for r in reports), f"the rolled key still taps F; {reports}")
+        self.kb.set_tick(600)
+        self.kb.tapping_task()          # would decide the orphaned slot as a hold
+        self.assertEqual(self.kb.report()[0], MOD_LALT, "only Alt, Shift must not latch")
+        self.kb.key_event(2, 2, False)
+        self.assertEqual(self.kb.report()[0], 0, "releasing the mod-tap clears Alt")
+
+
+# --- stuck-key regression ---------------------------------------------------
+
+
+class TestVialNoStuckKeys(unittest.TestCase):
+    """No tap/hold sequence may leave a modifier or a key latched once every key
+    is up again. The slot bookkeeping is easy to get wrong (a press replayed out
+    of the buffer has to keep its own release, or the term latches a modifier
+    that nothing can clear), so this drives rolls, chords and random sequences
+    over the home-row-mod layout and checks the report after each one.
+
+    Layout: S=Alt, D=Ctrl, F=Shift, J=Shift, K=Ctrl, L=Alt, plus a layer-tap on
+    space and a plain key, i.e. the layout the board runs.
+    """
+
+    KEYS = {"S": (2, 2), "D": (2, 3), "F": (2, 4), "J": (2, 7), "K": (2, 8), "L": (2, 9)}
+
+    def setUp(self):
+        self.kb = VialSim()
+        self.kb.boot_usb()
+        for name, keycode in (
+            ("S", QK_MOD_TAP | (MOD_LALT << 8) | KC_S),
+            ("D", QK_MOD_TAP | (MOD_LCTL << 8) | KC_D),
+            ("F", QK_MOD_TAP | (MOD_LSFT << 8) | KC_F),
+            ("J", QK_MOD_TAP | (MOD_RSFT << 8) | KC_J),
+            ("K", QK_MOD_TAP | (MOD_RCTL << 8) | KC_K),
+            ("L", QK_MOD_TAP | (MOD_LALT << 8) | KC_L),
+        ):
+            self.kb.set_keycode(0, *self.KEYS[name], keycode)
+        self.kb.set_keycode(0, SPC_ROW, SPC_COL, QK_LAYER_TAP | (2 << 8) | KC_SPC)
+        self.kb.set_keycode(0, 0, 1, KC_A)
+        self.tick = 0
+
+    def tearDown(self):
+        self.kb.close()
+
+    def press(self, name, pressed, dt=0):
+        self.tick += dt
+        self.kb.set_tick(self.tick)
+        self.kb.key_event(*self.KEYS[name], pressed)
+
+    def settle(self):
+        """Let the tapping term expire, so a slot left undecided decides."""
+        self.tick += 400
+        self.kb.set_tick(self.tick)
+        self.kb.tapping_task()
+
+    def assert_clean(self, what):
+        report = self.kb.report()
+        self.assertEqual(report[0], 0, f"{what}: modifiers still latched: {report}")
+        self.assertEqual([b for b in report[2:] if b], [], f"{what}: keys still latched: {report}")
+
+    def test_two_key_rolls_release_clean(self):
+        """Every ordered pair of tap/hold keys, released in either order."""
+        names = list(self.KEYS)
+        for first in names:
+            for second in names:
+                if first == second:
+                    continue
+                for order in ("second first", "first first"):
+                    self.press(first, True)
+                    self.press(second, True, dt=40)
+                    if order == "second first":
+                        self.press(second, False, dt=30)
+                        self.press(first, False, dt=30)
+                    else:
+                        self.press(first, False, dt=30)
+                        self.press(second, False, dt=30)
+                    self.settle()
+                    self.assert_clean(f"{first} then {second}, released {order}")
+
+    def test_hold_past_the_term_releases_clean(self):
+        """Two keys held past the term and released in either order."""
+        for first, second in (("S", "F"), ("F", "J"), ("D", "K"), ("J", "L")):
+            for order in ((first, second), (second, first)):
+                self.press(first, True)
+                self.press(second, True, dt=40)
+                self.settle()  # both are holds now
+                self.press(order[0], False, dt=10)
+                self.press(order[1], False, dt=10)
+                self.settle()
+                self.assert_clean(f"{first}+{second} held, released {order[0]} first")
+
+    def test_random_sequences_release_clean(self):
+        """A fixed pseudo-random mix of presses and releases over all keys,
+        including the layer-tap space and a plain key. After every point where
+        no key is down, the report must be empty."""
+        names = list(self.KEYS) + ["SPC", "A"]
+        state = 12345
+        down = set()
+        for step in range(120):
+            state = (state * 1103515245 + 12345) & 0x7FFFFFFF
+            name = names[(state >> 8) % len(names)]
+            dt = (state >> 16) % 90
+            if name in down:
+                down.discard(name)
+                pressed = False
+            else:
+                down.add(name)
+                pressed = True
+            if name in self.KEYS:
+                self.press(name, pressed, dt=dt)
+            else:
+                self.plain(name, pressed, dt)
+            if not down:
+                self.settle()
+                self.assert_clean(f"random sequence, step {step}")
+
+    def plain(self, name, pressed, dt=0):
+        self.tick += dt
+        self.kb.set_tick(self.tick)
+        pos = (SPC_ROW, SPC_COL) if name == "SPC" else (0, 1)
+        self.kb.key_event(*pos, pressed)
 
 
 # --- chordal hold ----------------------------------------------------------

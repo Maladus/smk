@@ -480,7 +480,14 @@ bool tapping_process_record(uint8_t row, uint8_t col, uint16_t keycode, bool pre
                 return true;
             }
         } else if (any_undecided()) {
+            // Queue this event first, then settle the holds: the replay can arm
+            // a slot for this very key (its press was buffered), and its release
+            // has to follow that press. On its own the release would be a stray,
+            // leaving the slot undecided with the key already up, so the term
+            // would latch its modifier for good.
+            buffer_event(row, col, pressed);
             resolve_all_holds();
+            return true;
         }
     }
 
