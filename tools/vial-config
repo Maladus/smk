@@ -28,6 +28,7 @@ REPORT = 32
 RAW_HID_USAGE_PAGE = b"\x06\x60\xff\x09\x61"  # usage page 0xFF60, usage 0x61
 
 QSID_NAMES = {
+    2: ("combo_term", "ms"),
     7: ("tapping_term", "ms"),
     22: ("permissive_hold", "bool"),
     23: ("hold_on_other_key_press", "bool"),
