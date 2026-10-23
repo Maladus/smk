@@ -118,6 +118,11 @@ class Device:
             keys += [out[4 + i] << 8 | out[5 + i] for i in range(0, 28, 2)]
         return keys
 
+    def set_keycode(self, layer, row, col, keycode):
+        out = self.req([0x05, layer, row, col, keycode >> 8, keycode & 0xFF])
+        if out[0] == 0xFF:
+            raise SystemExit(f"{layer}:{row}:{col} refused keycode 0x{keycode:04x}")
+
     def set_keymap(self, keys):
         for start in range(0, len(keys), 14):
             chunk = keys[start:start + 14]
@@ -242,6 +247,8 @@ def main():
     apply_p.add_argument("--no-entries", action="store_true", help="keymap and settings only")
     set_p = sub.add_parser("set", help="set QMK settings, e.g. 26=1 27=150")
     set_p.add_argument("pairs", nargs="+")
+    key_p = sub.add_parser("key", help="set keycodes, e.g. 0:2:3=0x2107 (layer:row:col)")
+    key_p.add_argument("pairs", nargs="+")
     args = parser.parse_args()
 
     dev = Device(args.device)
@@ -267,6 +274,14 @@ def main():
                 dev.set_macros(data["macros"])
                 dev.set_lighting(data.get("lighting") or {})
             print(f"applied {args.file}")
+        elif args.cmd == "key":
+            dev.unlock()
+            for pair in args.pairs:
+                where, _, value_s = pair.partition("=")
+                layer, row, col = (int(part, 0) for part in where.split(":"))
+                keycode = int(value_s, 0)
+                dev.set_keycode(layer, row, col, keycode)
+                print(f"{layer}:{row}:{col} = 0x{keycode:04x}")
         elif args.cmd == "set":
             dev.unlock()
             available = dev.qsids()
