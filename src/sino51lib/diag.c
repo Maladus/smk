@@ -1,6 +1,6 @@
 #include "diag.h"
 
-#if DEBUG == 1
+#if DEBUG == 1 && DEBUG_LOG_LEVEL >= 3
 
 #    include "flash.h"
 #    include "console.h"
@@ -17,7 +17,7 @@ void diag_info_read(uint16_t addr, __xdata uint8_t *dst, uint8_t len)
 void diag_emit_hex(const __xdata uint8_t *src, uint8_t len)
 {
     for (uint8_t i = 0; i < len; i++) {
-        dprintf("%02x", src[i]);
+        dlog3("%02x", src[i]);
     }
 }
 

@@ -24,6 +24,6 @@ void interrupts_task(void)
     }
     uint8_t vector          = unused_interrupt_vector;
     unused_interrupt_vector = UNUSED_INTERRUPT_NONE;
-    dprintf("UNUSED INT %u, source disabled\r\n", vector);
+    dlog1("UNUSED INT %u, source disabled\r\n", vector);
 }
 #endif

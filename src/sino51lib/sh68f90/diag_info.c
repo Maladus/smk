@@ -1,6 +1,6 @@
 #include "diag.h"
 
-#if DEBUG == 1
+#if DEBUG == 1 && DEBUG_LOG_LEVEL >= 3
 
 #    include "debug.h"
 #    include <stdint.h>
@@ -23,43 +23,43 @@ bool diag_emit(uint8_t step)
     switch (step) {
         case 0:
             diag_info_read(INFO_PART_NUMBER, diag_scratch, 5);
-            dprintf("PART ");
+            dlog3("PART ");
             diag_emit_hex(diag_scratch, 5);
-            dprintf("\r\n");
+            dlog3("\r\n");
             break;
         case 1:
             diag_info_read(INFO_ID_CODE, diag_scratch, 5);
-            dprintf("UID ");
+            dlog3("UID ");
             diag_emit_hex(diag_scratch, 5);
-            dprintf("\r\n");
+            dlog3("\r\n");
             break;
         case 2:
             diag_info_read(INFO_CUSTOMER_ID, diag_scratch, 4);
-            dprintf("CID ");
+            dlog3("CID ");
             diag_emit_hex(diag_scratch, 4);
             diag_info_read(INFO_OPERATION_NUM, diag_scratch, 2);
-            dprintf(" OPN ");
+            dlog3(" OPN ");
             diag_emit_hex(diag_scratch, 2);
-            dprintf("\r\n");
+            dlog3("\r\n");
             break;
         case 3:
             diag_info_read(INFO_SERIAL_NUMBER, diag_scratch, 4);
-            dprintf("SN ");
+            dlog3("SN ");
             diag_emit_hex(diag_scratch, 4);
-            dprintf("\r\n");
+            dlog3("\r\n");
             break;
         case 4:
             diag_info_read(INFO_SECURITY, diag_scratch, INFO_SECURITY_LEN);
-            dprintf("SEC ");
+            dlog3("SEC ");
             diag_emit_hex(diag_scratch, INFO_SECURITY_LEN);
-            dprintf("\r\n");
+            dlog3("\r\n");
             break;
         case 5:
             diag_info_read(INFO_CODE_OPTION_LOW, diag_scratch, CODE_OPTION_SPLIT);
             diag_info_read(INFO_CODE_OPTION_HI, diag_scratch + CODE_OPTION_SPLIT, CODE_OPTION_LEN - CODE_OPTION_SPLIT);
-            dprintf("OPT ");
+            dlog3("OPT ");
             diag_emit_hex(diag_scratch, CODE_OPTION_LEN);
-            dprintf("\r\n");
+            dlog3("\r\n");
             break;
         default:
             return false;

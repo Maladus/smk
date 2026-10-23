@@ -7,6 +7,14 @@ option(
 )
 option('sleep', type : 'feature', value : 'enabled', description : 'Inactivity sleep (SH68F90 Power-Down mode, INT4/USB wake)')
 option(
+    'log_level',
+    type : 'integer',
+    value : 3,
+    min : 0,
+    max : 3,
+    description : 'Console output in debug builds: 1 banner and errors, 2 status, 3 dumps and traces. Each level adds code and format strings, so a quieter image is a smaller image.',
+)
+option(
     'debug_sink',
     type : 'combo',
     choices : ['console', 'uart', 'both'],

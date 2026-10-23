@@ -391,6 +391,26 @@ simulator only* - the press is then silently lost. Tests that need that path
 should use hold on other key press (no replay, the press goes straight out) or
 stage the return frame at 0x23/0x24; see `TestVialChordalHold`.
 
+### Debug console and log levels
+
+The debug image prints to the HID console (`mise run log`). A call site picks a
+level (`dlog1` banner and hard errors, `dlog2` status, `dlog3` dumps and traces)
+and `-Dlog_level=0..3` decides which of them are compiled in. A level above the
+option is removed completely, format strings included, so a quieter image is
+also a smaller one:
+
+| log_level | kept | vial image, free flash |
+| --- | --- | --- |
+| 3 (default) | banner, status, dumps | 18 B |
+| 2 | banner + status (RF link, pairing, settings, battery) | 901 B |
+| 1 | banner + hard errors (e.g. an interrupt vector with no handler) | 1634 B |
+| 0 | nothing (the console plumbing is still linked) | 1812 B |
+| `--buildtype=release` | no debug code at all | 3463 B |
+
+So `-Dlog_level=1` keeps `mise run log` useful for boot banners and the
+unused-interrupt warning while giving back ~1.6 KB; a release build gives back
+3.4 KB but has no console at all.
+
 ## Code Options
 
 TBD — not yet traced on this board.

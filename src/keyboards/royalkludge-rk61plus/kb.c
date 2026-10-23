@@ -207,7 +207,7 @@ bool kb_process_record(uint16_t keycode, bool key_pressed)
                 if (link == RF_MODE_2_4G || link > RF_MODE_BT3) {
                     link = RF_MODE_BT1;
                 }
-                dprintf("rf reset + pairing %02x\r\n", link);
+                dlog2("rf reset + pairing %02x\r\n", link);
                 keyboard_state.paired    = 0;
                 keyboard_state.connected = 0;
                 pairing_active           = true;
@@ -220,7 +220,7 @@ bool kb_process_record(uint16_t keycode, bool key_pressed)
         case LNK_BT1:
         case LNK_BT2:
         case LNK_BT3:
-            dprintf("fnch %04x %u b24=%u w=%u m=%u rl=%u c=%u p=%u\r\n", keycode, (unsigned)key_pressed, (unsigned)kb_band_24g(), (unsigned)kb_wired(), (unsigned)conn_mode, (unsigned)keyboard_state.rf_link, (unsigned)keyboard_state.connected, (unsigned)keyboard_state.paired);
+            dlog2("fnch %04x %u b24=%u w=%u m=%u rl=%u c=%u p=%u\r\n", keycode, (unsigned)key_pressed, (unsigned)kb_band_24g(), (unsigned)kb_wired(), (unsigned)conn_mode, (unsigned)keyboard_state.rf_link, (unsigned)keyboard_state.connected, (unsigned)keyboard_state.paired);
 
             // On the direct 2.4G band the BLE channel keys are disabled.
             if (!kb_wired() && kb_band_24g()) {
@@ -376,7 +376,7 @@ void kb_update()
             link_hold_ticks++;
         } else {
             const rf_mode_t link = kb_keycode_to_rf_mode(link_hold_keycode);
-            dprintf("rf link pairing %02x\r\n", link);
+            dlog2("rf link pairing %02x\r\n", link);
             keyboard_state.paired    = 0;
             keyboard_state.connected = 0;
             pairing_active           = true;

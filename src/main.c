@@ -90,9 +90,9 @@ void main(void)
 {
     init();
 
-    dprintf("SMK v" TOSTRING(SMK_VERSION) "\r\n");
-    dprintf("KB " KEYBOARD_NAME " / " LAYOUT_NAME "\r\n");
-    dprintf("DEVICE vId:" TOSTRING(USB_VID) " pId:" TOSTRING(USB_PID) "\n\r");
+    dlog1("SMK v" TOSTRING(SMK_VERSION) "\r\n");
+    dlog1("KB " KEYBOARD_NAME " / " LAYOUT_NAME "\r\n");
+    dlog1("DEVICE vId:" TOSTRING(USB_VID) " pId:" TOSTRING(USB_PID) "\n\r");
 
     kb_init();
 
@@ -139,8 +139,10 @@ void main(void)
         sleep_task();
 
 #if DEBUG == 1
+#    if DEBUG_LOG_LEVEL >= 3
         diag_task();
         interrupts_task();
+#    endif
         console_task();
 #endif
     }

@@ -97,7 +97,7 @@ void user_battery_diag_task(void)
     user_battery_measure();
     EA = ea;
 
-    dprintf("bat rc=%u rf=%u lp=%u\r\n", keyboard_state.battery_level_rc, keyboard_state.battery_level_rf, keyboard_state.low_power);
+    dlog2("bat rc=%u rf=%u lp=%u\r\n", keyboard_state.battery_level_rc, keyboard_state.battery_level_rf, keyboard_state.low_power);
 }
 
 #else
