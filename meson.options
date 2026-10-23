@@ -9,7 +9,7 @@ option('sleep', type : 'feature', value : 'enabled', description : 'Inactivity s
 option(
     'log_level',
     type : 'integer',
-    value : 3,
+    value : 2,
     min : 0,
     max : 3,
     description : 'Console output in debug builds: 1 banner and errors, 2 status, 3 dumps and traces. Each level adds code and format strings, so a quieter image is a smaller image.',

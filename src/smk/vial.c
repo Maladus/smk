@@ -111,6 +111,7 @@ static const __code uint8_t vial_key_table[VIAL_KEY_TABLE_SIZE] = {0};
 #    define VIAL_DEF_BLOCK 32
 
 // QMK settings (Vial QMK Settings tab).
+#    define QMK_SETTING_COMBO_TERM              2
 #    define QMK_SETTING_TAPPING_TERM            7
 #    define QMK_SETTING_PERMISSIVE_HOLD         22
 #    define QMK_SETTING_HOLD_ON_OTHER_KEY_PRESS 23
@@ -227,7 +228,7 @@ static void vial_unlock_poll(uint8_t *out)
 // 16-bit values, 0xFFFF-terminated (and padded).
 static void vial_qmk_settings_query(uint8_t *out)
 {
-    static const __code uint16_t qsids[] = {QMK_SETTING_TAPPING_TERM, QMK_SETTING_PERMISSIVE_HOLD, QMK_SETTING_HOLD_ON_OTHER_KEY_PRESS, QMK_SETTING_RETRO_TAPPING, QMK_SETTING_QUICK_TAP_TERM, QMK_SETTING_CHORDAL_HOLD, QMK_SETTING_FLOW_TAP_TERM};
+    static const __code uint16_t qsids[] = {QMK_SETTING_COMBO_TERM, QMK_SETTING_TAPPING_TERM, QMK_SETTING_PERMISSIVE_HOLD, QMK_SETTING_HOLD_ON_OTHER_KEY_PRESS, QMK_SETTING_RETRO_TAPPING, QMK_SETTING_QUICK_TAP_TERM, QMK_SETTING_CHORDAL_HOLD, QMK_SETTING_FLOW_TAP_TERM};
     uint8_t                      i       = 0;
     for (uint8_t n = 0; n < sizeof(qsids) / sizeof(qsids[0]); n++) {
         out[i++] = (uint8_t)(qsids[n] & 0xFF);
@@ -246,6 +247,12 @@ static void vial_qmk_settings_get(const uint8_t *in, uint8_t *out)
     const uint16_t qsid = rd16le(in + 2);
     out[0]              = 0; // success
     switch (qsid) {
+        case QMK_SETTING_COMBO_TERM: {
+            const uint16_t term = user_settings.combo_term;
+            out[1]              = (uint8_t)(term & 0xFF);
+            out[2]              = (uint8_t)(term >> 8);
+            break;
+        }
         case QMK_SETTING_TAPPING_TERM: {
             const uint16_t term = dynamic_keymap_tapping_term();
             out[1]              = (uint8_t)(term & 0xFF);
@@ -289,6 +296,12 @@ static void vial_qmk_settings_set(const uint8_t *in, uint8_t *out)
     const uint16_t qsid = rd16le(in + 2);
     out[0]              = 0; // success
     switch (qsid) {
+        case QMK_SETTING_COMBO_TERM: {
+            const uint16_t term      = rd16le(in + 4);
+            user_settings.combo_term = (uint8_t)(term > 255 ? 255 : term);
+            settings_mark_dirty();
+            break;
+        }
         case QMK_SETTING_TAPPING_TERM:
             dynamic_keymap_set_tapping_term(rd16le(in + 4));
             break;
@@ -319,6 +332,8 @@ static void vial_qmk_settings_set(const uint8_t *in, uint8_t *out)
 static void vial_qmk_settings_reset(void)
 {
     dynamic_keymap_reset_settings();
+    user_settings.combo_term = 0; // back to the compiled COMBO_TERM
+    settings_mark_dirty();
 }
 
 // id_dynamic_entry_op: sub-op at in[2], entry index at in[3]. The counts reply

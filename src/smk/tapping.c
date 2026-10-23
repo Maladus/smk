@@ -285,11 +285,15 @@ static bool settle_rolls(uint8_t row, uint8_t col, uint16_t keycode)
     if (!dynamic_keymap_chordal_hold()) {
         return false;
     }
-    // A tap/hold key is never rolled over by another one: two of them pressed
-    // together are a chord (Ctrl+Shift), not two letters.
-    if (IS_QK_MOD_TAP(keycode) || IS_QK_LAYER_TAP(keycode) || IS_QK_LAYER_TAP_TOGGLE(keycode)) {
+    // A tap/hold key is not rolled over by another one: two of them pressed
+    // together are a chord (Ctrl+Shift), not two letters. The exception is the
+    // same modifier on both keys - that is never a chord, so a layout with Ctrl
+    // or Alt on both hands can still type those letter pairs.
+    const bool other_mod_tap = IS_QK_MOD_TAP(keycode);
+    if (IS_QK_LAYER_TAP(keycode) || IS_QK_LAYER_TAP_TOGGLE(keycode)) {
         return false;
     }
+    const uint8_t other_mods = other_mod_tap ? (uint8_t)QK_MOD_TAP_GET_MODS(keycode) : 0;
 
     const char hand = hand_of(row, col);
     bool       any  = false;
@@ -298,9 +302,16 @@ static bool settle_rolls(uint8_t row, uint8_t col, uint16_t keycode)
         if (!t->used || !t->undecided) {
             continue;
         }
-        const char other = hand_of(t->row, t->col);
-        if (hand == '*' || other == '*' || hand != other) {
-            continue; // a chord: leave it to the hold flags
+        if (other_mod_tap) {
+            // Same kind of modifier, either side: Ctrl+Ctrl is never a chord.
+            if (!t->mod_tap || (t->hold_mods & 0x0F) != (other_mods & 0x0F)) {
+                continue; // different modifiers: a chord candidate
+            }
+        } else {
+            const char other = hand_of(t->row, t->col);
+            if (hand == '*' || other == '*' || hand != other) {
+                continue; // a chord: leave it to the hold flags
+            }
         }
         decide_tap(i);
         any = true;

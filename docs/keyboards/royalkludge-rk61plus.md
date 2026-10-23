@@ -349,6 +349,7 @@ Settings tab and live in the keymap store, so they survive a reflash.
 
 | Setting | qsid | Default | Effect |
 | --- | --- | --- | --- |
+| Combo term | 2 | 50 ms (compiled) | How far apart the keys of a combo may be spread. 0 keeps the compiled value. |
 | Tapping term | 7 | 200 ms | How long a press may stay undecided. |
 | Permissive hold | 22 | on | Another key pressed *and released* while a tap/hold key is down makes it a hold. |
 | Hold on other key press | 23 | off | Another key's *press* makes it a hold at once. |
@@ -365,7 +366,10 @@ other key press decide when it settles. Handedness comes from the matrix
 position (`LAYOUT_60` lays the keys out in physical order): columns 0-5 are the
 left half and 6-13 the right half above the bottom row, and the bottom row
 (thumb and modifier keys) is exempt so those chord with anything. Two tap/hold
-keys pressed together are never a roll - Ctrl+Shift chords keep working.
+keys pressed together are never a roll - Ctrl+Shift chords keep working - with
+one exception: the *same* modifier on both keys (left Ctrl and right Ctrl, or
+left Alt and right Alt) is never a chord, so a layout that carries Ctrl or Alt on
+both hands can still type those letter pairs (`fj`, `sl`).
 
 Measured in the simulator (F = `MT(LCTL, F)`, D = `KC_D`, both left hand, D
 pressed 40 ms after F):
@@ -401,15 +405,16 @@ also a smaller one:
 
 | log_level | kept | vial image, free flash |
 | --- | --- | --- |
-| 3 (default) | banner, status, dumps | 18 B |
-| 2 | banner + status (RF link, pairing, settings, battery) | 901 B |
+| 3 | banner, status, dumps | 18 B |
+| 2 (default) | banner + status (RF link, pairing, settings, battery) | 901 B |
 | 1 | banner + hard errors (e.g. an interrupt vector with no handler) | 1634 B |
 | 0 | nothing (the console plumbing is still linked) | 1812 B |
 | `--buildtype=release` | no debug code at all | 3463 B |
 
 So `-Dlog_level=1` keeps `mise run log` useful for boot banners and the
 unused-interrupt warning while giving back ~1.6 KB; a release build gives back
-3.4 KB but has no console at all.
+3.4 KB but has no console at all. The default is 2: the dumps are rarely needed
+and the image needs the room.
 
 ## Code Options
 

@@ -4,6 +4,7 @@
 
 #    include "dynamic_keymap.h"
 #    include "keycodes.h"
+#    include "settings.h"
 #    include "matrix.h"
 #    include "tick.h"
 
@@ -13,8 +14,15 @@
 
 #    if VIAL_COMBO_ENTRIES > 0
 
-// How long the source keys may be spread apart and still count as a chord.
+// How long the source keys may be spread apart and still count as a chord. The
+// host can change it through the Vial QMK setting (qsid 2); 0 keeps this default.
 #        define COMBO_TERM 50
+
+static uint16_t combo_term(void)
+{
+    const uint16_t term = user_settings.combo_term;
+    return term ? term : COMBO_TERM;
+}
 
 // Buffered source presses; enough for a few overlapping chords.
 #        define COMBO_BUFFER 16
@@ -186,7 +194,7 @@ bool combo_process_record(uint8_t row, uint8_t col, uint16_t keycode, bool press
 
 void combo_task(void)
 {
-    if (window_active && (tick_ms() - window_start) >= COMBO_TERM) {
+    if (window_active && (tick_ms() - window_start) >= combo_term()) {
         combo_flush_except(NULL);
         window_active = false;
     }

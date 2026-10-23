@@ -94,6 +94,7 @@ MOD_LSFT = 0x02
 MOD_LALT = 0x04
 MOD_RCTL = 0x11
 MOD_RSFT = 0x12
+MOD_RALT = 0x14
 
 QK_MOD_TAP = 0x2000
 QK_TO = 0x5200
@@ -718,9 +719,20 @@ class TestVialProtocol(unittest.TestCase):
 
     def test_qmk_settings_query(self):
         out = self.kb.vial([0xFE, 0x09])
-        qsids = [out[i] | (out[i + 1] << 8) for i in range(0, 14, 2)]
-        self.assertEqual(qsids, [7, 22, 23, 24, 25, 26, 27])
-        self.assertEqual(out[14] | (out[15] << 8), 0xFFFF, "the list is 0xFFFF-terminated")
+        qsids = [out[i] | (out[i + 1] << 8) for i in range(0, 16, 2)]
+        self.assertEqual(qsids, [2, 7, 22, 23, 24, 25, 26, 27])
+        self.assertEqual(out[16] | (out[17] << 8), 0xFFFF, "the list is 0xFFFF-terminated")
+
+    def test_combo_term_setting_roundtrip(self):
+        """qsid 2 is the combo term. 0 means "keep the compiled default"."""
+        out = self.kb.vial([0xFE, 0x0A, 2, 0x00])
+        self.assertEqual(out[1] | (out[2] << 8), 0, "the compiled default is in use")
+        self.kb.vial([0xFE, 0x0B, 2, 0x00, 0x50, 0x00])  # 80
+        out = self.kb.vial([0xFE, 0x0A, 2, 0x00])
+        self.assertEqual(out[1] | (out[2] << 8), 80)
+        self.kb.vial([0xFE, 0x0C])  # reset
+        out = self.kb.vial([0xFE, 0x0A, 2, 0x00])
+        self.assertEqual(out[1] | (out[2] << 8), 0, "reset goes back to the compiled default")
 
     def test_retro_and_quick_tap_settings_roundtrip(self):
         self.assertEqual(self.kb.vial([0xFE, 0x0A, 24, 0x00])[1], 0, "retro tapping is off by default")
@@ -1567,6 +1579,7 @@ class TestVialChordalHold(unittest.TestCase):
     F_ROW, F_COL = 2, 4
     J_ROW, J_COL = 2, 7
     K_ROW, K_COL = 2, 8
+    L_ROW, L_COL = 2, 9
 
     def setUp(self):
         self.kb = VialSim()
@@ -1667,6 +1680,49 @@ class TestVialChordalHold(unittest.TestCase):
         self.kb.key_event(SPC_ROW, SPC_COL, False)
         self.assertEqual(self.kb.layer_bits(), 0)
 
+    def test_same_modifier_pair_rolls(self):
+        """Two keys carrying the same modifier are never a chord, so a layout
+        with Ctrl or Alt on both hands can still type those letter pairs."""
+        self.kb.set_keycode(0, self.F_ROW, self.F_COL, QK_MOD_TAP | (MOD_LSFT << 8) | KC_F)
+        self.kb.set_keycode(0, self.J_ROW, self.J_COL, QK_MOD_TAP | (MOD_RSFT << 8) | KC_J)
+        self.kb.set_keycode(0, self.S_ROW, self.S_COL, QK_MOD_TAP | (MOD_LALT << 8) | KC_S)
+        self.kb.set_keycode(0, self.L_ROW, self.L_COL, QK_MOD_TAP | (MOD_LALT << 8) | KC_L)
+        for first, second, want_first, want_second in (
+            ((self.F_ROW, self.F_COL), (self.J_ROW, self.J_COL), KC_F, KC_J),  # both Shift
+            ((self.S_ROW, self.S_COL), (self.L_ROW, self.L_COL), KC_S, KC_L),  # both Alt
+        ):
+            self.kb.set_tick(0)
+            self.kb.key_event(*first, True)
+            self.kb.set_tick(40)
+            before = len(self.kb.ep1_reports())
+            self.kb.key_event(*second, True)  # same modifier: a roll, not a chord
+            self.kb.set_tick(70)
+            self.kb.key_event(*second, False)  # tapped, so its letter goes out
+            reports = self.kb.ep1_reports()[before:]
+            self.assertTrue(any(want_first in r[3:] for r in reports), f"the first letter types; {reports}")
+            self.assertTrue(any(want_second in r[3:] for r in reports), f"the second letter types; {reports}")
+            self.assertEqual(self.kb.report()[0], 0, "no modifier may latch")
+            self.kb.key_event(*first, False)
+            self.assertEqual(self.kb.report()[0], 0)
+
+    def test_different_modifiers_still_chord(self):
+        """Ctrl on the left and Ctrl on the right is still one modifier, but Ctrl
+        on the left and Alt on the right are different modifiers: that is a real
+        chord and must hold."""
+        self.kb.set_keycode(0, self.J_ROW, self.J_COL, QK_MOD_TAP | (MOD_RALT << 8) | KC_J)
+        self.kb.set_tick(0)
+        self.kb.key_event(self.F_ROW, self.F_COL, True)  # Ctrl, left
+        self.kb.set_tick(40)
+        self.kb.key_event(self.J_ROW, self.J_COL, True)  # Alt, right
+        self.kb.set_tick(600)
+        self.kb.tapping_task()
+        # The report bit for right Alt is 0x40; MOD_RALT above is the 5-bit keycode
+        # encoding of the mod-tap, not the report bit.
+        self.assertEqual(self.kb.report()[0], MOD_LCTL | 0x40, "both holds apply")
+        self.kb.key_event(self.J_ROW, self.J_COL, False)
+        self.kb.key_event(self.F_ROW, self.F_COL, False)
+        self.assertEqual(self.kb.report()[0], 0)
+
     def test_chordal_hold_setting_roundtrip(self):
         self.assertEqual(self.kb.vial([0xFE, 0x0A, 26, 0x00])[1], 1, "chordal hold is on")
         self.kb.vial([0xFE, 0x0B, 26, 0x00, 0x00])
@@ -1755,6 +1811,31 @@ class TestVialCombos(unittest.TestCase):
         self.assertEqual(self.kb.report()[2], KC_ENTER, "the chord must emit Enter")
         self.kb.key_event(*self.L, False)
         self.assertEqual(self.kb.report()[2], 0, "releasing a source key releases the output")
+
+    def test_combo_term_setting_decides_the_window(self):
+        """The Vial combo term (qsid 2) replaces the compiled 50 ms: with a long
+        term a slower chord still fires, with a short one the first key types."""
+        self.kb.set_combo(0, [KC_J, KC_K, KC_L], KC_ENTER)
+
+        self.kb.vial([0xFE, 0x0B, 2, 0x00, 0xC8, 0x00])  # 200 ms
+        self.kb.set_tick(0)
+        self.kb.key_event(*self.J, True)
+        self.kb.set_tick(60)
+        self.kb.key_event(*self.K, True)
+        self.kb.set_tick(120)
+        self.kb.key_event(*self.L, True)
+        self.assertEqual(self.kb.report()[2], KC_ENTER, "inside the 200 ms window the chord fires")
+        for pos in (self.J, self.K, self.L):
+            self.kb.key_event(*pos, False)
+
+        self.kb.vial([0xFE, 0x0B, 2, 0x00, 0x0A, 0x00])  # 10 ms
+        self.kb.set_tick(1000)
+        self.kb.key_event(*self.J, True)
+        self.kb.set_tick(1030)
+        self.kb.combo_task()  # 30 ms > 10 ms: the buffered J is typed
+        self.assertEqual(self.kb.report()[2], KC_J, "outside the window the key types instead")
+        self.kb.key_event(*self.J, False)
+        self.assertEqual(self.kb.report()[2], 0)
 
     def test_lone_key_passes_after_term(self):
         self.kb.set_combo(0, [KC_J, KC_K, KC_L], KC_ENTER)
